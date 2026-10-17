@@ -1,0 +1,40 @@
+[package]
+name = "wisp"
+version = "0.1.0"
+edition = "2024"
+description = "Voice chat client for TeamSpeak 3 servers"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/TimKunze96/wisp"
+publish = false
+
+[dependencies]
+anyhow = "1"
+time = "0.3"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+audiopus = "0.3.0-rc.0"
+base64 = "0.22"
+cpal = "0.18"
+dirs = "5"
+futures = "0.3"
+gpui-kit = "=0.7.1"
+ksni = { version = "0.3.6", features = ["blocking"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "net", "time", "sync", "macros", "io-util"] }
+tokio-stream = "0.1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+tsclientlib = { git = "https://github.com/ReSpeak/tsclientlib", rev = "ee3bc6f45a7137db7793ba5593a321df400d53e5" }
+tsproto = { git = "https://github.com/ReSpeak/tsclientlib", rev = "ee3bc6f45a7137db7793ba5593a321df400d53e5" }
+tsproto-packets = { git = "https://github.com/ReSpeak/tsclientlib", rev = "ee3bc6f45a7137db7793ba5593a321df400d53e5" }
+tsproto-types = { git = "https://github.com/ReSpeak/tsclientlib", rev = "ee3bc6f45a7137db7793ba5593a321df400d53e5" }
+nnnoiseless = { version = "0.5", default-features = false }
+ogg = "0.9"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+md-5 = "0.10"
+crc32fast = "1"
+reqwest = { version = "0.13", default-features = false }
+
+# GPUI is far too slow unoptimised
+[profile.dev.package."*"]
+opt-level = 2
