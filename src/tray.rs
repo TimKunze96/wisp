@@ -27,43 +27,13 @@ pub fn spawn(net: Handle) -> Option<TrayHandle> {
     TsTray { net, snap: Snapshot::default() }.spawn().ok().map(TrayHandle)
 }
 
-/// The logo mark as RGBA pixels at `size`.
-fn mark(size: u32) -> Vec<[u8; 4]> {
-    let tree = resvg::usvg::Tree::from_data(include_bytes!("../assets/wisp-mark.svg"), &Default::default());
-    let (Ok(tree), Some(mut pixmap)) = (tree, resvg::tiny_skia::Pixmap::new(size, size)) else { return Vec::new() };
-    let scale = size as f32 / tree.size().width().max(tree.size().height());
-    resvg::render(&tree, resvg::tiny_skia::Transform::from_scale(scale, scale), &mut pixmap.as_mut());
-    pixmap.pixels().iter().map(|p| { let c = p.demultiply(); [c.red(), c.green(), c.blue(), c.alpha()] }).collect()
-}
-
-/// The logo as a solid silhouette in `color`, so it reads like the other bar icons.
+/// The logo as a solid silhouette in `color`, ARGB32 in network order.
 fn logo(color: (u8, u8, u8)) -> Icon {
-    static PIXELS: std::sync::LazyLock<Vec<[u8; 4]>> = std::sync::LazyLock::new(|| mark(SIZE as u32));
-    let mut data = Vec::with_capacity(PIXELS.len() * 4);
-    for &[_, _, _, a] in PIXELS.iter() {
-        // the faint end of the tail would vanish at bar size
-        let a = (a as f32 * 2.2).min(255.0) as u8;
-        data.extend_from_slice(&[a, color.0, color.1, color.2]);
-    }
+    let data = crate::logo::silhouette(SIZE as u32, color).chunks(4).flat_map(|p| [p[3], p[0], p[1], p[2]]).collect();
     Icon { width: SIZE, height: SIZE, data }
 }
 
 const SIZE: i32 = 64;
-
-impl TsTray {
-    fn state(&self) -> (&'static str, (u8, u8, u8)) {
-        let s = &self.snap;
-        if s.servers.is_empty() {
-            ("Not connected", (0xa9, 0xb1, 0xd6))
-        } else if s.self_muted || s.deafened {
-            ("Muted", (0xe5, 0x53, 0x4b))
-        } else if s.transmitting {
-            ("Talking", (0x5e, 0xd2, 0x86))
-        } else {
-            ("Connected", (0x7a, 0xa2, 0xf7))
-        }
-    }
-}
 
 impl Tray for TsTray {
     fn id(&self) -> String {
@@ -75,26 +45,12 @@ impl Tray for TsTray {
     }
 
     fn icon_pixmap(&self) -> Vec<Icon> {
-        vec![logo(self.state().1)]
+        vec![logo(crate::logo::state(&self.snap).1)]
     }
 
     fn tool_tip(&self) -> ToolTip {
-        let (state, _) = self.state();
-        let lines: Vec<String> = self
-            .snap
-            .servers
-            .iter()
-            .map(|s| {
-                let ch = s
-                    .own_channel
-                    .and_then(|id| s.channels.iter().find(|c| c.id == id))
-                    .map(|c| c.name.as_str())
-                    .unwrap_or("-");
-                let name = if s.server_name.is_empty() { &s.label } else { &s.server_name };
-                format!("{name}: {ch}")
-            })
-            .collect();
-        ToolTip { title: format!("Wisp: {state}"), description: lines.join("\n"), ..Default::default() }
+        let (state, _) = crate::logo::state(&self.snap);
+        ToolTip { title: format!("Wisp: {state}"), description: crate::logo::where_am_i(&self.snap), ..Default::default() }
     }
 
     fn activate(&mut self, _x: i32, _y: i32) {

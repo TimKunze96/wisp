@@ -580,11 +580,12 @@ impl SettingsView {
         v_flex()
             .gap_8()
             .max_w(px(640.))
+            .when(cfg!(not(target_os = "linux")), |d| d.child(label("A different device takes effect the next time Wisp starts.")))
             .child(
                 section("Microphone")
                     .child(inputs)
                     .child(setting_row(format!("Volume  {:.0}%", s.mic_volume * 100.), Slider::new(&self.mic)))
-                    .child(setting_row(
+                    .when(crate::audio::HAS_ECHO_CANCEL, |d| d.child(setting_row(
                         "Echo cancellation",
                         h_flex()
                             .gap_3()
@@ -596,7 +597,7 @@ impl SettingsView {
                                 },
                             )))
                             .child(label("For speakers: keeps what Wisp plays out of your mic (WebRTC)")),
-                    ))
+                    )))
                     .child(setting_row(
                         "Noise suppression",
                         h_flex()
@@ -630,7 +631,7 @@ impl SettingsView {
                             })))
                             .child(label("Turns quiet people up and loud ones down, on top of their own volume")),
                     ))
-                    .child(setting_row(
+                    .when(crate::audio::HAS_DUCKING, |d| d.child(setting_row(
                         "Lower other apps",
                         h_flex()
                             .gap_3()
@@ -640,8 +641,8 @@ impl SettingsView {
                                 t.model.update(cx, |m, cx| m.update_settings(cx, |s| s.ducking = v));
                             })))
                             .child(label("While someone talks, music and videos play quieter")),
-                    ))
-                    .when(s.ducking, |d| {
+                    )))
+                    .when(crate::audio::HAS_DUCKING && s.ducking, |d| {
                         d.child(setting_row(format!("Lower to  {:.0}%", s.duck_level * 100.), Slider::new(&self.duck)))
                     }),
             )
@@ -802,11 +803,14 @@ impl SettingsView {
         v_flex()
             .gap_4()
             .max_w(px(720.))
-            .child(label(
+            .child(label(if cfg!(target_os = "linux") {
                 "Hotkeys work everywhere, also while Wisp is in the background. Wisp writes them to \
                  ~/.config/hypr/wisp.lua and reloads Hyprland. Keys Hyprland already uses can't be recorded \
-                 here (Hyprland takes them first).",
-            ))
+                 here (Hyprland takes them first)."
+            } else {
+                "Hotkeys work everywhere, also while Wisp is in the background. A key another app already \
+                 uses as a hotkey can't be taken."
+            }))
             .when(!included, |d| {
                 d.child(
                     h_flex()
@@ -1131,7 +1135,7 @@ impl SettingsView {
                 .map(|(_, d)| d.clone());
             let mut targets = h_flex().flex_wrap().gap_2();
             if l.targets.is_empty() {
-                targets = targets.child(label("No targets. Right-click people or channels in the main window to add them."));
+                targets = targets.child(label("No targets. Right-click people or channels in the main window to add them.").w_full());
             }
             for (j, t) in l.targets.iter().enumerate() {
                 let (id, t2) = (id.clone(), t.clone());
@@ -1303,7 +1307,7 @@ impl SettingsView {
                         "Hold a list's key to talk only to its targets instead of your channel. Add people and \
                          channels by right-clicking them in the main window. Groups and commanders are looked up \
                          when you press the key.",
-                    ).flex_1())
+                    ).flex_1().min_w_0())
                     .child(Button::new("new-whisper").label("New list").small().primary().on_click(cx.listener(
                         |t, _, _, cx| {
                             t.model.update(cx, |m, cx| {
@@ -1457,32 +1461,29 @@ impl SettingsView {
                         )))
                         .child(label("Starts in the tray and connects to your auto-connect servers")),
                 ))
-                .child(setting_row(
-                    "Open ts3server:// links",
-                    h_flex()
-                        .gap_3()
-                        .items_center()
-                        .child(Switch::new("links").checked(crate::desktop::link_handler() == "wisp.desktop").on_click(
-                            cx.listener(|t, v: &bool, _, cx| {
-                                if *v {
-                                    let before = crate::desktop::link_handler();
-                                    t.model.update(cx, |m, cx| {
-                                        m.update_settings(cx, |s| {
-                                            if before != "wisp.desktop" && !before.is_empty() {
-                                                s.previous_link_handler = Some(before.clone());
-                                            }
-                                        })
-                                    });
-                                    crate::desktop::set_link_handler("wisp.desktop");
-                                } else {
-                                    let back = t.model.read(cx).settings.previous_link_handler.clone();
-                                    crate::desktop::set_link_handler(back.as_deref().unwrap_or("teamspeak.desktop"));
-                                }
-                                cx.notify();
-                            }),
-                        ))
-                        .child(label("Join links from websites and chats open in Wisp")),
-                )),
+                .when(crate::desktop::CAN_SET_LINKS, |d| {
+                    d.child(setting_row(
+                        "Open ts3server:// links",
+                        h_flex()
+                            .gap_3()
+                            .items_center()
+                            .child(Switch::new("links").checked(crate::desktop::handles_links()).on_click(cx.listener(
+                                |t, v: &bool, _, cx| {
+                                    if *v {
+                                        let before = crate::desktop::take_links();
+                                        if before.is_some() {
+                                            t.model.update(cx, |m, cx| m.update_settings(cx, |s| s.previous_link_handler = before));
+                                        }
+                                    } else {
+                                        let back = t.model.read(cx).settings.previous_link_handler.clone();
+                                        crate::desktop::give_back_links(back.as_deref());
+                                    }
+                                    cx.notify();
+                                },
+                            )))
+                            .child(label("Join links from websites and chats open in Wisp")),
+                    ))
+                }),
             )
             .child(
                 section("Command line").child(

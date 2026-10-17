@@ -20,7 +20,7 @@ gpui-kit = "=0.7.1"
 resvg = "0.45"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["rt", "net", "time", "sync", "macros", "io-util"] }
+tokio = { version = "1", features = ["rt", "net", "time", "sync", "macros", "io-util", "fs"] }
 tokio-stream = "0.1"
 tracing = "0.1"
 tracing-subscriber = "0.3"
@@ -32,6 +32,9 @@ nnnoiseless = { version = "0.5", default-features = false }
 ogg = "0.9"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 md-5 = "0.10"
+ed25519-dalek = "2"
+flate2 = "1"
+sha2 = "0.10"
 crc32fast = "1"
 reqwest = { version = "0.13", default-features = false }
 
@@ -47,8 +50,36 @@ notify-rust = "4"
 winreg = "0.56"
 windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
 
-[target.'cfg(windows)'.build-dependencies]
+[build-dependencies]
 winresource = "0.1"
+
+[package.metadata.packager]
+product-name = "Wisp"
+identifier = "at.timkunze.wisp"
+description = "Voice chat client for TeamSpeak 3 servers"
+authors = ["Tim Kunze"]
+publisher = "Tim Kunze"
+homepage = "https://github.com/TimKunze96/wisp"
+license-file = "LICENSE"
+category = "SocialNetworking"
+binaries = [{ path = "wisp", main = true }]
+icons = [
+    "assets/icons/32x32.png",
+    "assets/icons/128x128.png",
+    "assets/icons/128x128@2x.png",
+    "assets/icons/wisp.icns",
+    "assets/icons/wisp.ico",
+]
+deep-link-protocols = [{ schemes = ["ts3server"] }]
+
+[package.metadata.packager.macos]
+# Ad-hoc signature; there is no Developer ID certificate.
+signing-identity = "-"
+minimum-system-version = "11.0"
+info-plist-path = "packaging/macos/Info.plist"
+
+[package.metadata.packager.nsis]
+installer-icon = "assets/icons/wisp.ico"
 
 # GPUI is far too slow unoptimised
 [profile.dev.package."*"]

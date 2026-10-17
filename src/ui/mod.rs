@@ -11,6 +11,7 @@ mod main_view;
 mod menus;
 mod settings;
 mod theme;
+mod updater;
 mod widgets;
 
 use futures::StreamExt;
@@ -43,6 +44,8 @@ pub struct Model {
     admin_view: Option<gpui_kit::WeakEntity<admin::AdminView>>,
     /// Current main window size, saved when it closes.
     pub main_size: Option<(f32, f32)>,
+    /// A newer release and how far installing it got.
+    pub update: Option<updater::UpdateState>,
 }
 
 impl Model {
@@ -86,6 +89,7 @@ pub fn start(
     // ourselves (tray while connected, see on_window_closed below).
     cx.set_quit_mode(gpui_kit::QuitMode::Explicit);
     let tray = crate::tray::spawn(net.clone());
+    crate::hotkeys::start(net.clone(), &settings);
     let model = cx.new(|_| Model {
         net,
         snap: Snapshot::default(),
@@ -99,7 +103,9 @@ pub fn start(
         admin_window: None,
         admin_view: None,
         main_size: None,
+        update: None,
     });
+    updater::start(&model, cx);
 
     let m = model.clone();
     cx.spawn(async move |cx| {

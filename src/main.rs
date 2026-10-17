@@ -1,4 +1,6 @@
 #![recursion_limit = "256"]
+// a GUI app on Windows: no console window (the CLI attaches to its terminal)
+#![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod audio;
 mod config;
@@ -6,10 +8,13 @@ mod ctl;
 mod desktop;
 mod hotkeys;
 mod identity;
+mod logo;
 mod notify;
 mod net;
+#[cfg_attr(not(target_os = "linux"), path = "tray_native.rs")]
 mod tray;
 mod ui;
+mod update;
 
 use gpui_kit::App;
 
@@ -30,10 +35,19 @@ fn main() {
         commands.clear();
     }
     if !commands.is_empty() {
+        attach_console();
         // `wisp status | head` should end quietly, not panic on the closed pipe
         reset_sigpipe();
         std::process::exit(ctl::cli(&commands));
     }
+    // After an update the new version waits for the old one to finish quitting.
+    if std::env::var_os(update::RESTARTED_ENV).is_some() {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        while ctl::is_running() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+    }
+    update::clean_up();
     // Single instance: a second start just shows the running one.
     if ctl::is_running() {
         std::process::exit(ctl::cli(&["show".to_string()]));
@@ -45,8 +59,21 @@ fn main() {
     let (ui_tx, ui_rx) = futures::channel::mpsc::unbounded();
     let _ = ctl::UI.set(ui_tx);
 
-    gpui_kit::application().with_assets(gpui_kit::assets::AllAssets).run(move |cx: &mut App| {
+    let app = gpui_kit::application().with_assets(gpui_kit::assets::AllAssets);
+    // macOS hands links (and clicks on the Dock icon) to the running app
+    app.on_open_urls(|urls| {
+        for url in urls.into_iter().filter(|u| u.starts_with("ts3server://")) {
+            ctl::ui(ctl::UiRequest::Link(url));
+        }
+    });
+    app.on_reopen(|_| ctl::ui(ctl::UiRequest::Show));
+    app.run(move |cx: &mut App| {
         gpui_kit::init(cx);
+        // the UI font travels with the app (it's rarely installed outside GNOME)
+        let _ = cx.text_system().add_fonts(vec![
+            include_bytes!("../assets/fonts/AdwaitaSans-Regular.ttf").as_slice().into(),
+            include_bytes!("../assets/fonts/AdwaitaSans-Italic.ttf").as_slice().into(),
+        ]);
         ui::apply_theme(cx);
         desktop::install();
         if let Some(l) = link {
@@ -56,6 +83,20 @@ fn main() {
     });
 }
 
+#[cfg(not(unix))]
+fn reset_sigpipe() {}
+
+/// Print into the terminal the CLI was started from.
+#[cfg(windows)]
+fn attach_console() {
+    use windows_sys::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
+    unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
+}
+
+#[cfg(not(windows))]
+fn attach_console() {}
+
+#[cfg(unix)]
 fn reset_sigpipe() {
     unsafe extern "C" {
         fn signal(sig: i32, handler: usize) -> usize;

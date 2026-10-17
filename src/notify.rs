@@ -1,8 +1,11 @@
 //! Sounds and desktop notifications for things that happen on a server.
-//! Sounds are short tones generated once into ~/.cache/wisp/sounds and played
-//! with pw-play on the chosen output; popups go through notify-send.
+//! On Linux sounds are short tones generated once into ~/.cache/wisp/sounds
+//! and played with pw-play on the chosen output, and popups go through
+//! notify-send. Elsewhere cpal plays them and notify-rust shows the popups.
 
+#[cfg(target_os = "linux")]
 use std::path::PathBuf;
+#[cfg(target_os = "linux")]
 use std::process::{Command, Stdio};
 
 use serde::{Deserialize, Serialize};
@@ -122,6 +125,7 @@ enum Sound {
 }
 
 impl Sound {
+    #[cfg(target_os = "linux")]
     fn name(self) -> &'static str {
         match self {
             Sound::Join => "join",
@@ -152,8 +156,8 @@ impl Sound {
 
 const RATE: u32 = 48_000;
 
-/// Soft sine notes with a quick attack and exponential decay, as 16-bit WAV.
-fn render(sound: Sound) -> Vec<u8> {
+/// Soft sine notes with a quick attack and exponential decay, at [`RATE`].
+fn tone(sound: Sound) -> Vec<f32> {
     let notes = sound.notes();
     let len_ms = notes.iter().map(|(_, s, l)| s + l).max().unwrap_or(0) + 20;
     let n = (RATE * len_ms / 1000) as usize;
@@ -172,7 +176,13 @@ fn render(sound: Sound) -> Vec<u8> {
             }
         }
     }
-    let data: Vec<u8> = samples
+    samples
+}
+
+/// [`tone`] as a 16-bit WAV.
+#[cfg(target_os = "linux")]
+fn render(sound: Sound) -> Vec<u8> {
+    let data: Vec<u8> = tone(sound)
         .iter()
         .flat_map(|s| ((s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16).to_le_bytes())
         .collect();
@@ -193,6 +203,7 @@ fn render(sound: Sound) -> Vec<u8> {
     wav
 }
 
+#[cfg(target_os = "linux")]
 fn sound_file(sound: Sound) -> Option<PathBuf> {
     // bump the version when the sounds change so old files get replaced
     let dir = crate::config::cache_dir().join("sounds/v1");
@@ -204,6 +215,40 @@ fn sound_file(sound: Sound) -> Option<PathBuf> {
     Some(path)
 }
 
+#[cfg(not(target_os = "linux"))]
+fn play(sound: Sound, volume: f32, output: Option<&str>) {
+    use cpal::traits::{DeviceTrait, StreamTrait};
+    let samples = tone(sound);
+    let output = output.map(str::to_string);
+    let volume = volume.clamp(0.0, 1.5);
+    std::thread::spawn(move || {
+        let Some(device) = crate::audio::find_device(output.as_deref(), false) else { return };
+        let Ok(config) = device.default_output_config() else { return };
+        let config = config.config();
+        let (channels, rate) = (config.channels as usize, config.sample_rate as f32);
+        let len = samples.len();
+        let step = RATE as f32 / rate;
+        let mut pos = 0f32;
+        let stream = device.build_output_stream::<f32, _, _>(
+            config,
+            move |out, _| {
+                for frame in out.chunks_mut(channels) {
+                    let v = samples.get(pos as usize).copied().unwrap_or(0.0) * volume;
+                    frame.fill(v);
+                    pos += step;
+                }
+            },
+            |_| {},
+            None,
+        );
+        let Ok(stream) = stream else { return };
+        if stream.play().is_ok() {
+            std::thread::sleep(std::time::Duration::from_millis(len as u64 * 1000 / RATE as u64 + 150));
+        }
+    });
+}
+
+#[cfg(target_os = "linux")]
 fn play(sound: Sound, volume: f32, output: Option<&str>) {
     let Some(path) = sound_file(sound) else { return };
     let mut cmd = Command::new("pw-play");
@@ -216,6 +261,7 @@ fn play(sound: Sound, volume: f32, output: Option<&str>) {
 }
 
 /// Start a helper process and wait for it on a thread (no zombies).
+#[cfg(target_os = "linux")]
 fn run(mut cmd: Command) {
     if let Ok(mut child) = cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
         std::thread::spawn(move || child.wait());
@@ -229,6 +275,7 @@ pub fn preview(kind: EventKind, settings: &crate::config::Settings) {
 }
 
 /// Say `text` with espeak-ng, played like the sounds (volume, output).
+#[cfg(target_os = "linux")]
 fn speak(text: &str, volume: f32, output: Option<&str>) {
     let Ok(mut speech) = Command::new("espeak-ng")
         .args(["-v", "en-us", "-s", "170", "--stdout", text])
@@ -253,6 +300,15 @@ fn speak(text: &str, volume: f32, output: Option<&str>) {
     }
 }
 
+#[cfg(not(target_os = "linux"))]
+fn speak(_text: &str, _volume: f32, _output: Option<&str>) {}
+
+#[cfg(not(target_os = "linux"))]
+pub fn can_speak() -> bool {
+    false
+}
+
+#[cfg(target_os = "linux")]
 pub fn can_speak() -> bool {
     Command::new("espeak-ng").arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok()
 }
@@ -277,12 +333,25 @@ pub fn fire(event: &Event, settings: &crate::config::Settings, focused: bool) {
     }
     let chat = matches!(event.kind, EventKind::PrivateMessage | EventKind::Mention | EventKind::ChannelMessage);
     if s.popup && event.kind.can_popup() && !(chat && focused) {
-        let mut cmd = Command::new("notify-send");
-        cmd.args(["--app-name", "Wisp", "--icon", "audio-headset"]);
-        if matches!(event.kind, EventKind::Poke | EventKind::MovedOrKicked) {
-            cmd.args(["--urgency", "critical"]);
-        }
-        cmd.arg(&event.title).arg(&event.body);
-        run(cmd);
+        popup(event);
     }
+}
+
+#[cfg(target_os = "linux")]
+fn popup(event: &Event) {
+    let mut cmd = Command::new("notify-send");
+    cmd.args(["--app-name", "Wisp", "--icon", "audio-headset"]);
+    if matches!(event.kind, EventKind::Poke | EventKind::MovedOrKicked) {
+        cmd.args(["--urgency", "critical"]);
+    }
+    cmd.arg(&event.title).arg(&event.body);
+    run(cmd);
+}
+
+#[cfg(not(target_os = "linux"))]
+fn popup(event: &Event) {
+    let (title, body) = (event.title.clone(), event.body.clone());
+    std::thread::spawn(move || {
+        let _ = notify_rust::Notification::new().appname("Wisp").summary(&title).body(&body).show();
+    });
 }

@@ -1,13 +1,11 @@
-//! Control socket ($XDG_RUNTIME_DIR/wisp-ctl.sock) and the CLI that talks to it.
-//! One request line in, one JSON line out.
+//! Control socket ($XDG_RUNTIME_DIR/wisp-ctl.sock, a named pipe on Windows)
+//! and the CLI that talks to it. One request line in, one JSON line out.
 
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 
 use serde_json::{Value, json};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
-use tokio::net::UnixListener;
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::config::Settings;
@@ -15,6 +13,21 @@ use crate::net::{AdminAction, ChannelProps, Cmd, Snapshot, Zone, channel_drop, r
 
 pub fn socket() -> PathBuf {
     runtime_dir().join("wisp-ctl.sock")
+}
+
+#[cfg(windows)]
+fn pipe_name() -> String {
+    format!(r"\\.\pipe\wisp-ctl-{}", std::env::var("USERNAME").unwrap_or_default())
+}
+
+#[cfg(unix)]
+fn connect() -> Option<std::os::unix::net::UnixStream> {
+    std::os::unix::net::UnixStream::connect(socket()).ok()
+}
+
+#[cfg(windows)]
+fn connect() -> Option<std::fs::File> {
+    std::fs::OpenOptions::new().read(true).write(true).open(pipe_name()).ok()
 }
 
 /// Requests for the UI thread (show the window, quit).
@@ -39,22 +52,38 @@ pub fn ui(req: UiRequest) {
 }
 
 /// Start the socket server on the current `LocalSet`.
+#[cfg(unix)]
 pub fn serve(cmds: mpsc::UnboundedSender<Cmd>) {
     let _ = std::fs::remove_file(socket());
-    let Ok(listener) = UnixListener::bind(socket()) else { return };
+    let Ok(listener) = tokio::net::UnixListener::bind(socket()) else { return };
     tokio::task::spawn_local(async move {
         while let Ok((stream, _)) = listener.accept().await {
-            let cmds = cmds.clone();
-            tokio::task::spawn_local(async move {
-                let (read, mut write) = stream.into_split();
-                let mut lines = tokio::io::BufReader::new(read).lines();
-                if let Ok(Some(line)) = lines.next_line().await {
-                    let reply = handle(&line, &cmds).await;
-                    let _ = write.write_all(format!("{reply}\n").as_bytes()).await;
-                }
-            });
+            tokio::task::spawn_local(answer(stream, cmds.clone()));
         }
     });
+}
+
+/// Start the pipe server on the current `LocalSet`.
+#[cfg(windows)]
+pub fn serve(cmds: mpsc::UnboundedSender<Cmd>) {
+    use tokio::net::windows::named_pipe::ServerOptions;
+    let Ok(mut server) = ServerOptions::new().first_pipe_instance(true).create(pipe_name()) else { return };
+    tokio::task::spawn_local(async move {
+        while server.connect().await.is_ok() {
+            // the next client needs a fresh instance waiting
+            let Ok(next) = ServerOptions::new().create(pipe_name()) else { return };
+            tokio::task::spawn_local(answer(std::mem::replace(&mut server, next), cmds.clone()));
+        }
+    });
+}
+
+async fn answer(stream: impl AsyncRead + AsyncWrite, cmds: mpsc::UnboundedSender<Cmd>) {
+    let (read, mut write) = tokio::io::split(stream);
+    let mut lines = tokio::io::BufReader::new(read).lines();
+    if let Ok(Some(line)) = lines.next_line().await {
+        let reply = handle(&line, &cmds).await;
+        let _ = write.write_all(format!("{reply}\n").as_bytes()).await;
+    }
 }
 
 async fn status(cmds: &mpsc::UnboundedSender<Cmd>) -> Option<Snapshot> {
@@ -120,6 +149,13 @@ async fn handle(line: &str, cmds: &mpsc::UnboundedSender<Cmd>) -> Value {
             });
             ok
         }
+        "whisper" => match crate::net::ptt_message(line) {
+            Some(cmd) => {
+                let _ = cmds.send(cmd);
+                ok
+            }
+            None => json!({"ok": false, "error": "usage: whisper <list> down|up"}),
+        },
         "join" => {
             let Some(server) = snap.active_server() else {
                 return json!({"ok": false, "error": "not connected"});
@@ -389,8 +425,8 @@ usage: wisp [command]
                             complaints, server, log, files <channel>)
   show | quit               show the window / quit the app";
 
-fn request(line: &str) -> Option<Value> {
-    let mut stream = UnixStream::connect(socket()).ok()?;
+pub fn request(line: &str) -> Option<Value> {
+    let mut stream = connect()?;
     stream.write_all(format!("{line}\n").as_bytes()).ok()?;
     let mut reply = String::new();
     BufReader::new(stream).read_line(&mut reply).ok()?;
@@ -398,7 +434,7 @@ fn request(line: &str) -> Option<Value> {
 }
 
 pub fn is_running() -> bool {
-    UnixStream::connect(socket()).is_ok()
+    connect().is_some()
 }
 
 /// Run a CLI command. Returns the process exit code.

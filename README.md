@@ -11,7 +11,8 @@
 <p align="center">
   <a href="#license"><img src="https://img.shields.io/badge/license-MIT-8fb3d9?style=flat-square" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/rust-1.88%2B-8fb3d9?style=flat-square&logo=rust&logoColor=white" alt="Rust 1.88+">
-  <img src="https://img.shields.io/badge/platform-Linux-8fb3d9?style=flat-square&logo=linux&logoColor=white" alt="Platform: Linux">
+  <a href="https://github.com/TimKunze96/wisp/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/TimKunze96/wisp/build.yml?branch=main&style=flat-square&label=build" alt="Build"></a>
+  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-8fb3d9?style=flat-square" alt="Platform: Linux, Windows, macOS">
   <img src="https://img.shields.io/badge/Hyprland-ready-8fb3d9?style=flat-square&logo=hyprland&logoColor=white" alt="Hyprland ready">
   <img src="https://img.shields.io/badge/UI-GPUI-8fb3d9?style=flat-square" alt="UI: GPUI">
   <img src="https://img.shields.io/badge/protocol-TeamSpeak%203-8fb3d9?style=flat-square&logo=teamspeak&logoColor=white" alt="Protocol: TeamSpeak 3">
@@ -62,15 +63,35 @@ And some extras I found useful:
 
 ## Status
 
-Runs on Linux with PipeWire. Hotkeys use Hyprland key bindings; on other
-desktops you can bind `wisp ptt down` / `wisp ptt up` yourself. macOS and
-Windows are planned, see [docs/PLAN.md](docs/PLAN.md).
+Linux is what I use every day: PipeWire for audio, Hyprland key bindings for
+hotkeys (on other desktops you can bind `wisp ptt down` / `wisp ptt up`
+yourself).
+
+Windows and macOS builds are new and barely tested. Hotkeys are registered with
+the system there, and echo cancellation and lowering other apps are Linux-only
+for now. See [docs/PLAN.md](docs/PLAN.md) for what's left.
 
 Wisp is an independent project. It is not made by, affiliated with or endorsed
 by TeamSpeak Systems GmbH. "TeamSpeak" is their trademark and is only used here
 to say which servers Wisp talks to. Like every third-party TeamSpeak client, Wisp
 connects with the version information of an official client (through
 tsclientlib), because servers expect it.
+
+## Install
+
+Grab the latest build from [Releases](https://github.com/TimKunze96/wisp/releases):
+
+- Windows: `Wisp_..._x64-setup.exe` installs for your user, no admin needed.
+  The build isn't signed, so SmartScreen warns once ("More info", "Run anyway").
+- macOS: the `.dmg` for your Mac (`aarch64` for Apple Silicon, `x64` for
+  Intel); drag Wisp to Applications. It isn't notarized, so the first start
+  needs right-click, Open (or `xattr -dr com.apple.quarantine /Applications/Wisp.app`).
+- Linux: the `.AppImage` (make it executable and run it) or the `.deb`. Wisp
+  adds itself to your launcher and can take over `ts3server://` links (Settings).
+
+Wisp checks for new releases and updates itself in place (Windows, macOS and
+the AppImage; the `.deb` only points you to the download). Updates are signed,
+and Wisp refuses anything that doesn't match the key built into it.
 
 ## Building
 
@@ -80,9 +101,6 @@ Needs Rust 1.88 or newer, CMake and a C compiler (for Opus).
 cargo build --release
 ./target/release/wisp
 ```
-
-On first start Wisp adds itself to your launcher and can take over
-`ts3server://` links (Settings).
 
 ## License
 

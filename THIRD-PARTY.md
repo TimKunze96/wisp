@@ -2,7 +2,9 @@
 
 Wisp is built from these crates (with their dependencies), under their own licenses.
 Crates under MPL-2.0 are used unmodified; their source is at the linked repositories.
-The bundled icons are [Lucide](https://lucide.dev) (ISC), shipped with gpui-kit.
+The bundled icons are [Lucide](https://lucide.dev) (ISC), shipped with gpui-kit. The
+bundled font is [Adwaita Sans](https://gitlab.gnome.org/GNOME/adwaita-fonts) (SIL OFL 1.1,
+see assets/fonts/LICENSE).
 
 | Crate | Version | License |
 |---|---|---|

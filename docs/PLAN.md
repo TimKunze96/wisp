@@ -236,9 +236,26 @@ GPUI, tsclientlib, cpal, Opus and RNNoise already run on all three. What needs w
 | Packaging | binary / AUR | `.app` in a `.dmg`; signing + notarization need an Apple developer account | installer (`.msi`); unsigned shows a SmartScreen warning |
 
 Order:
-- [ ] `platform` module with one file per OS; everything above goes behind it, Linux
-      keeps what it has
-- [ ] Windows first: it cross-compiles from Linux (`cargo-xwin`), so build errors show up
-      here; running it needs a Windows machine or VM
-- [ ] macOS: builds only on a Mac (or a macOS CI runner)
-- [ ] CI matrix (Linux, macOS arm64 + x86_64, Windows) producing the packages
+- [x] Per-OS code behind `cfg` (audio/pipewire.rs vs audio/devices.rs, tray.rs vs
+      tray_native.rs, hotkeys/native.rs, named pipe on Windows); Linux keeps what it has
+- [x] Windows compiles (`cargo xwin check`, see below)
+- [x] Bundled UI font (Adwaita Sans), app icons (.ico in the exe, .icns in the .app)
+- [x] Packages through cargo-packager (like Telescope): AppImage + .deb, NSIS installer
+      (per user), .app in a .dmg per architecture. Pushing to `release` builds a draft
+      release; publishing it makes it live
+- [x] Self-update (src/update.rs, from Telescope): signed latest.json, one package per
+      platform, swaps the exe / .app / AppImage and restarts. Key: 1Password "Wisp update
+      signing key", GitHub secret WISP_UPDATE_SIGNING_KEY
+- [ ] Run it on Windows: tray, hotkeys (press and release), sounds, popups, links, autostart
+- [ ] Run it on macOS: same, plus the microphone permission prompt and links from the browser
+- [ ] Device changes without a restart on Windows/macOS (reopen the cpal streams)
+- [ ] Echo cancellation off Linux (webrtc-audio-processing) and ducking on Windows
+- [ ] Read aloud off Linux (`tts` crate)
+- [ ] Mouse buttons as hotkeys off Linux (needs low-level hooks / an event tap)
+- [ ] Signing: Windows code signing, Apple notarization (needs a developer account)
+
+Windows check from Linux (Opus is skipped, nothing is linked):
+
+```sh
+OPUS_LIB_DIR=/tmp/empty OPUS_STATIC=1 XWIN_ACCEPT_LICENSE=1 cargo xwin check --target x86_64-pc-windows-msvc
+```

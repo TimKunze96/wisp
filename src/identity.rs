@@ -82,15 +82,14 @@ pub fn load_all() -> Vec<StoredIdentity> {
 }
 
 pub fn save_all(list: &[StoredIdentity]) {
-    use std::os::unix::fs::OpenOptionsExt;
     let _ = std::fs::create_dir_all(config::config_dir());
     let Ok(json) = serde_json::to_string_pretty(list) else { return };
     let tmp = file().with_extension("json.tmp");
-    let written = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let written = options
         .open(&tmp)
         .and_then(|mut f| std::io::Write::write_all(&mut f, json.as_bytes()));
     if written.is_ok() {

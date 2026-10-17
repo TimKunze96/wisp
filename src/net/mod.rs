@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use futures::channel::mpsc as fmpsc;
 use serde::Serialize;
+#[cfg(unix)]
 use tokio::net::UnixDatagram;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::LocalSet;
@@ -439,14 +440,25 @@ pub fn ptt_socket() -> PathBuf {
 }
 
 pub fn runtime_dir() -> PathBuf {
-    PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR").unwrap_or("/tmp".into()))
+    std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(std::env::temp_dir)
 }
 
 /// Send "down" / "up" to a running client; does nothing if none runs.
+#[cfg(unix)]
 pub fn send_ptt(state: &str) {
     if let Ok(sock) = std::os::unix::net::UnixDatagram::unbound() {
         let _ = sock.send_to(state.as_bytes(), ptt_socket());
     }
+}
+
+/// No datagram sockets here; the control pipe takes it.
+#[cfg(not(unix))]
+pub fn send_ptt(state: &str) {
+    let line = match state {
+        "down" | "up" => format!("ptt {state}"),
+        other => other.to_string(),
+    };
+    let _ = crate::ctl::request(&line);
 }
 
 pub fn spawn(settings: Settings) -> (Handle, fmpsc::UnboundedReceiver<Snapshot>) {
@@ -589,7 +601,10 @@ impl Manager {
             audio.a2ts.lock().unwrap().set_listener(mic_tx);
         }
         let _ = std::fs::remove_file(ptt_socket());
+        #[cfg(unix)]
         let ptt_sock = UnixDatagram::bind(ptt_socket()).ok();
+        #[cfg(not(unix))]
+        let ptt_sock: Option<()> = None;
         let mut tick = tokio::time::interval(Duration::from_millis(100));
         let mut reroute = tokio::time::interval(Duration::from_secs(10));
 
@@ -1012,12 +1027,21 @@ impl Manager {
     }
 }
 
-/// "down" / "up" for push-to-talk, "whisper <list> down|up" for a whisper key.
+#[cfg(not(unix))]
+async fn recv_ptt(_: Option<&()>) -> Option<Cmd> {
+    futures::future::pending().await
+}
+
+#[cfg(unix)]
 async fn recv_ptt(sock: Option<&UnixDatagram>) -> Option<Cmd> {
     let Some(sock) = sock else { return futures::future::pending().await };
     let mut buf = [0u8; 256];
     let n = sock.recv(&mut buf).await.ok()?;
-    let msg = std::str::from_utf8(&buf[..n]).unwrap_or("").trim();
+    ptt_message(std::str::from_utf8(&buf[..n]).unwrap_or("").trim())
+}
+
+/// "down" / "up" for push-to-talk, "whisper <list> down|up" for a whisper key.
+pub fn ptt_message(msg: &str) -> Option<Cmd> {
     match msg {
         "down" => Some(Cmd::Ptt(true)),
         "up" => Some(Cmd::Ptt(false)),

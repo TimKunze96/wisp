@@ -136,12 +136,7 @@ fn write(file: BufWriter<File>, rx: mpsc::Receiver<Chunk>) -> anyhow::Result<()>
 
 /// ~/Music/Wisp/<date time> <server>.opus
 pub fn new_path(server: &str) -> PathBuf {
-    let music = std::process::Command::new("xdg-user-dir")
-        .arg("MUSIC")
-        .output()
-        .ok()
-        .map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()))
-        .filter(|p| p.is_dir())
+    let music = dirs::audio_dir()
         .or_else(|| dirs::home_dir().map(|h| h.join("Music")))
         .unwrap_or_else(|| PathBuf::from("."));
     let safe: String = server.chars().map(|c| if c.is_alphanumeric() || " .-_".contains(c) { c } else { '_' }).collect();

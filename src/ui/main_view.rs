@@ -434,6 +434,7 @@ impl MainView {
                     )
                     .child(list),
             )
+            .children(self.update_card(cx))
             .child(self.self_panel(cx))
     }
 
