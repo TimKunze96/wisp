@@ -3,7 +3,7 @@
 //! runtime inside a `LocalSet` (tsclientlib and the audio code need that).
 
 pub mod admin;
-mod chat;
+pub mod chat;
 pub mod files;
 mod session;
 

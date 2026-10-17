@@ -5,6 +5,7 @@
 mod audio;
 mod config;
 mod ctl;
+mod demo;
 mod desktop;
 mod hotkeys;
 mod identity;
@@ -24,7 +25,8 @@ pub struct ConnectionId(u64);
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let hidden = args.iter().any(|a| a == "--hidden");
-    let mut commands: Vec<String> = args.into_iter().filter(|a| a != "--hidden").collect();
+    let demo = args.iter().any(|a| a == "--demo");
+    let mut commands: Vec<String> = args.into_iter().filter(|a| a != "--hidden" && a != "--demo").collect();
     // ts3server:// link (from the browser): hand it to the running app, or
     // start and open it
     let link = commands.first().filter(|a| a.starts_with("ts3server://")).cloned();
@@ -48,14 +50,22 @@ fn main() {
         }
     }
     update::clean_up();
+    if demo {
+        demo::isolate();
+    }
     // Single instance: a second start just shows the running one.
-    if ctl::is_running() {
+    if !demo && ctl::is_running() {
         std::process::exit(ctl::cli(&["show".to_string()]));
     }
 
     tracing_subscriber::fmt().with_max_level(tracing::Level::ERROR).init();
-    let settings = config::Settings::load();
-    let (handle, snapshots) = net::spawn(settings.clone());
+    let (handle, snapshots, settings) = if demo {
+        demo::spawn()
+    } else {
+        let settings = config::Settings::load();
+        let (handle, snapshots) = net::spawn(settings.clone());
+        (handle, snapshots, settings)
+    };
     let (ui_tx, ui_rx) = futures::channel::mpsc::unbounded();
     let _ = ctl::UI.set(ui_tx);
 
@@ -75,7 +85,9 @@ fn main() {
             include_bytes!("../assets/fonts/AdwaitaSans-Italic.ttf").as_slice().into(),
         ]);
         ui::apply_theme(cx);
-        desktop::install();
+        if !demo {
+            desktop::install();
+        }
         if let Some(l) = link {
             ctl::ui(ctl::UiRequest::Link(l));
         }

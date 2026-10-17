@@ -19,6 +19,10 @@
   <img src="https://img.shields.io/badge/vibe-coded-d98f8f?style=flat-square" alt="Vibe coded">
 </p>
 
+<p align="center">
+  <img src="docs/screenshot.png" alt="Wisp with a busy server: channel tree, people talking, activity">
+</p>
+
 ## Why
 
 The official TeamSpeak 3 client and I never got along on Linux. Global hotkeys
@@ -101,6 +105,9 @@ Needs Rust 1.88 or newer, CMake and a C compiler (for Opus).
 cargo build --release
 ./target/release/wisp
 ```
+
+`wisp --demo` starts with made-up servers and people (nothing connects, settings
+go to a temporary folder); that's what the screenshot shows.
 
 ## License
 
