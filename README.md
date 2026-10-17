@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="#license"><img src="https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-8fb3d9?style=flat-square" alt="License: MIT or Apache-2.0"></a>
+  <a href="#license"><img src="https://img.shields.io/badge/license-MIT-8fb3d9?style=flat-square" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/rust-1.88%2B-8fb3d9?style=flat-square&logo=rust&logoColor=white" alt="Rust 1.88+">
   <img src="https://img.shields.io/badge/platform-Linux-8fb3d9?style=flat-square&logo=linux&logoColor=white" alt="Platform: Linux">
   <img src="https://img.shields.io/badge/Hyprland-ready-8fb3d9?style=flat-square&logo=hyprland&logoColor=white" alt="Hyprland ready">
@@ -86,8 +86,7 @@ On first start Wisp adds itself to your launcher and can take over
 
 ## License
 
-Licensed under either of [Apache License 2.0](LICENSE-APACHE) or
-[MIT](LICENSE-MIT) at your option. Third-party licenses are listed in
+[MIT](LICENSE). Third-party licenses are listed in
 [THIRD-PARTY.md](THIRD-PARTY.md).
 
 Recording a conversation can need everyone's consent where you live; Wisp shows

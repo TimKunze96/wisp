@@ -3,7 +3,7 @@ name = "wisp"
 version = "0.1.0"
 edition = "2024"
 description = "Voice chat client for TeamSpeak 3 servers"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 repository = "https://github.com/TimKunze96/wisp"
 publish = false
 
@@ -17,7 +17,6 @@ cpal = "0.18"
 dirs = "5"
 futures = "0.3"
 gpui-kit = "=0.7.1"
-ksni = { version = "0.3.6", features = ["blocking"] }
 resvg = "0.45"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -35,6 +34,21 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 md-5 = "0.10"
 crc32fast = "1"
 reqwest = { version = "0.13", default-features = false }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni = { version = "0.3.6", features = ["blocking"] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+tray-icon = "0.26"
+global-hotkey = "0.9"
+notify-rust = "4"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.56"
+windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
 
 # GPUI is far too slow unoptimised
 [profile.dev.package."*"]
