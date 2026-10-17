@@ -604,7 +604,7 @@ impl MainView {
                         .items_center()
                         .justify_center()
                         .gap_3()
-                        .child(icon("wind", 32., DIM))
+                        .child(div().opacity(0.6).child(mark(44.)))
                         .child(label("Pick a server on the left to connect.")),
                 )
                 .child(footer_row())

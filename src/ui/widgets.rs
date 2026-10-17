@@ -164,13 +164,24 @@ pub fn segments(level: f32, color: u32) -> Div {
         .child(div().h_full().w(gpui_kit::relative(level)).bg(rgb(color)))
 }
 
+/// The Wisp logo without its tile.
+pub fn mark(size: f32) -> impl IntoElement {
+    static MARK: std::sync::LazyLock<std::sync::Arc<gpui_kit::Image>> = std::sync::LazyLock::new(|| {
+        std::sync::Arc::new(gpui_kit::Image::from_bytes(
+            gpui_kit::ImageFormat::Svg,
+            include_bytes!("../../assets/wisp-mark.svg").to_vec(),
+        ))
+    });
+    img(MARK.clone()).size(px(size)).flex_none()
+}
+
 /// The Wisp wordmark.
 pub fn logo() -> Div {
     div()
         .flex()
         .items_center()
         .gap_2()
-        .child(icon("wind", 16., TEXT))
+        .child(mark(18.))
         .child(div().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child("Wisp"))
 }
 

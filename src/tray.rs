@@ -1,5 +1,6 @@
-//! StatusNotifierItem tray icon (ksni). The icon is drawn here, so it looks the
-//! same under every icon theme: grey idle, blue connected, green talking, red muted.
+//! StatusNotifierItem tray icon (ksni). The icon is the logo, drawn here so it
+//! looks the same under every icon theme: grey idle, blue connected, green
+//! talking, red muted.
 
 use ksni::blocking::TrayMethods;
 use ksni::menu::{CheckmarkItem, StandardItem, SubMenu};
@@ -26,32 +27,40 @@ pub fn spawn(net: Handle) -> Option<TrayHandle> {
     TsTray { net, snap: Snapshot::default() }.spawn().ok().map(TrayHandle)
 }
 
-fn circle(rgb: (u8, u8, u8), ring: bool) -> Icon {
-    let size = 32i32;
-    let mut data = Vec::with_capacity((size * size * 4) as usize);
-    let c = (size as f32 - 1.0) / 2.0;
-    for y in 0..size {
-        for x in 0..size {
-            let d = ((x as f32 - c).powi(2) + (y as f32 - c).powi(2)).sqrt();
-            let inside = if ring { d <= 15.0 && (d >= 11.0 || d <= 7.0) } else { d <= 13.0 };
-            let a = if inside { 255 } else { 0 };
-            data.extend_from_slice(&[a, rgb.0, rgb.1, rgb.2]); // ARGB32, network order
-        }
-    }
-    Icon { width: size, height: size, data }
+/// The logo mark as RGBA pixels at `size`.
+fn mark(size: u32) -> Vec<[u8; 4]> {
+    let tree = resvg::usvg::Tree::from_data(include_bytes!("../assets/wisp-mark.svg"), &Default::default());
+    let (Ok(tree), Some(mut pixmap)) = (tree, resvg::tiny_skia::Pixmap::new(size, size)) else { return Vec::new() };
+    let scale = size as f32 / tree.size().width().max(tree.size().height());
+    resvg::render(&tree, resvg::tiny_skia::Transform::from_scale(scale, scale), &mut pixmap.as_mut());
+    pixmap.pixels().iter().map(|p| { let c = p.demultiply(); [c.red(), c.green(), c.blue(), c.alpha()] }).collect()
 }
 
+/// The logo as a solid silhouette in `color`, so it reads like the other bar icons.
+fn logo(color: (u8, u8, u8)) -> Icon {
+    static PIXELS: std::sync::LazyLock<Vec<[u8; 4]>> = std::sync::LazyLock::new(|| mark(SIZE as u32));
+    let mut data = Vec::with_capacity(PIXELS.len() * 4);
+    for &[_, _, _, a] in PIXELS.iter() {
+        // the faint end of the tail would vanish at bar size
+        let a = (a as f32 * 2.2).min(255.0) as u8;
+        data.extend_from_slice(&[a, color.0, color.1, color.2]);
+    }
+    Icon { width: SIZE, height: SIZE, data }
+}
+
+const SIZE: i32 = 64;
+
 impl TsTray {
-    fn state(&self) -> (&'static str, (u8, u8, u8), bool) {
+    fn state(&self) -> (&'static str, (u8, u8, u8)) {
         let s = &self.snap;
         if s.servers.is_empty() {
-            ("Not connected", (0x8a, 0x8f, 0x98), false)
+            ("Not connected", (0xa9, 0xb1, 0xd6))
         } else if s.self_muted || s.deafened {
-            ("Muted", (0xe5, 0x53, 0x4b), false)
+            ("Muted", (0xe5, 0x53, 0x4b))
         } else if s.transmitting {
-            ("Talking", (0x3e, 0xc2, 0x6b), true)
+            ("Talking", (0x5e, 0xd2, 0x86))
         } else {
-            ("Connected", (0x4f, 0x8c, 0xff), false)
+            ("Connected", (0x7a, 0xa2, 0xf7))
         }
     }
 }
@@ -66,12 +75,11 @@ impl Tray for TsTray {
     }
 
     fn icon_pixmap(&self) -> Vec<Icon> {
-        let (_, rgb, ring) = self.state();
-        vec![circle(rgb, ring)]
+        vec![logo(self.state().1)]
     }
 
     fn tool_tip(&self) -> ToolTip {
-        let (state, _, _) = self.state();
+        let (state, _) = self.state();
         let lines: Vec<String> = self
             .snap
             .servers
