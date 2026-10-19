@@ -68,8 +68,8 @@ And some extras I found useful:
 ## Status
 
 Linux is what I use every day: PipeWire for audio, Hyprland key bindings for
-hotkeys (on other desktops you can bind `wisp ptt down` / `wisp ptt up`
-yourself).
+hotkeys. On other desktops (KDE Plasma, GNOME) hotkeys go through the global
+shortcuts portal and work while Wisp is running.
 
 Windows and macOS builds are new and barely tested. Hotkeys are registered with
 the system there, and echo cancellation and lowering other apps are Linux-only

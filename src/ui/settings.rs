@@ -803,14 +803,7 @@ impl SettingsView {
         v_flex()
             .gap_4()
             .max_w(px(720.))
-            .child(label(if cfg!(target_os = "linux") {
-                "Hotkeys work everywhere, also while Wisp is in the background. Wisp writes them to \
-                 ~/.config/hypr/wisp.lua and reloads Hyprland. Keys Hyprland already uses can't be recorded \
-                 here (Hyprland takes them first)."
-            } else {
-                "Hotkeys work everywhere, also while Wisp is in the background. A key another app already \
-                 uses as a hotkey can't be taken."
-            }))
+            .child(label(hotkeys::about()))
             .when(!included, |d| {
                 d.child(
                     h_flex()

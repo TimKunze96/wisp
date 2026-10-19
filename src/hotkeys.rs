@@ -1,10 +1,10 @@
-//! Global hotkeys. On Linux through Hyprland: Wisp writes
-//! ~/.config/hypr/wisp.lua with binds that run `wisp ...`, and hyprland.lua
-//! loads it with `pcall(require, "hypr.wisp")`. Push-to-talk gets a press and
-//! a release bind. On Windows and macOS Wisp registers them itself
-//! (see `native`).
+//! Global hotkeys. On Hyprland Wisp writes ~/.config/hypr/wisp.lua with binds
+//! that run `wisp ...`, and hyprland.lua loads it with
+//! `pcall(require, "hypr.wisp")`. Push-to-talk gets a press and a release
+//! bind. Other Linux desktops (KDE Plasma, GNOME) get them through the
+//! GlobalShortcuts portal (see `portal`). On Windows and macOS Wisp registers
+//! them itself (see `native`).
 
-#[cfg(target_os = "linux")]
 use std::collections::BTreeMap;
 #[cfg(target_os = "linux")]
 use std::path::PathBuf;
@@ -13,14 +13,64 @@ use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
+use crate::config::WhisperList;
+use crate::ctl::{UiRequest, ui};
+use crate::net::{Cmd, Handle};
+
 #[cfg(not(target_os = "linux"))]
 mod native;
 #[cfg(not(target_os = "linux"))]
 pub use native::*;
-
-/// Hotkeys are Hyprland binds here, which outlive Wisp; nothing to set up.
 #[cfg(target_os = "linux")]
-pub fn start(_net: crate::net::Handle, _settings: &crate::config::Settings) {}
+mod portal;
+
+#[cfg(target_os = "linux")]
+fn hyprland() -> bool {
+    std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some()
+}
+
+/// Hyprland binds outlive Wisp, so there's nothing to set up there. Elsewhere
+/// the portal session lives as long as Wisp does.
+#[cfg(target_os = "linux")]
+pub fn start(net: Handle, settings: &crate::config::Settings) {
+    if !hyprland() {
+        portal::start(net, settings);
+    }
+}
+
+#[derive(Clone)]
+enum Binding {
+    Action(Action),
+    Whisper(String),
+}
+
+/// The hotkeys that are set, with what each one does.
+fn bindings(hotkeys: &BTreeMap<Action, String>, whispers: &[WhisperList]) -> Vec<(String, Binding)> {
+    let mut out: Vec<(String, Binding)> = hotkeys
+        .iter()
+        .filter(|(_, k)| !k.trim().is_empty())
+        .map(|(a, k)| (k.clone(), Binding::Action(*a)))
+        .collect();
+    out.extend(whispers.iter().filter(|w| !w.hotkey.trim().is_empty()).map(|w| (w.hotkey.clone(), Binding::Whisper(w.id.clone()))));
+    out
+}
+
+fn fire(binding: Binding, down: bool, net: &Handle) {
+    match binding {
+        Binding::Action(Action::PushToTalk) => net.send(Cmd::Ptt(down)),
+        Binding::Whisper(id) => net.send(Cmd::Whisper(id, down)),
+        _ if !down => {}
+        Binding::Action(Action::ToggleTalk) => net.send(Cmd::TogglePtt),
+        Binding::Action(Action::ShowWindow) => ui(UiRequest::Show),
+        // toggles need the current state, which the control socket has
+        Binding::Action(Action::ToggleMute) => {
+            std::thread::spawn(|| crate::ctl::request("mute"));
+        }
+        Binding::Action(Action::ToggleDeafen) => {
+            std::thread::spawn(|| crate::ctl::request("deafen"));
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -90,9 +140,23 @@ pub fn file() -> PathBuf {
 }
 
 #[cfg(target_os = "linux")]
-/// Whether hyprland.lua loads our file.
+pub fn about() -> &'static str {
+    if hyprland() {
+        "Hotkeys work everywhere, also while Wisp is in the background. Wisp writes them to \
+         ~/.config/hypr/wisp.lua and reloads Hyprland. Keys Hyprland already uses can't be recorded \
+         here (Hyprland takes them first)."
+    } else {
+        "Hotkeys work everywhere while Wisp is running, also in the background. Wisp registers them \
+         with your desktop, which may ask you to confirm them. Keys can also be changed in the \
+         desktop's shortcut settings."
+    }
+}
+
+#[cfg(target_os = "linux")]
+/// Whether hyprland.lua loads our file. Only Hyprland needs it.
 pub fn included() -> bool {
-    std::fs::read_to_string(hypr_dir().join("hyprland.lua")).is_ok_and(|s| s.contains("hypr.wisp"))
+    !hyprland()
+        || std::fs::read_to_string(hypr_dir().join("hyprland.lua")).is_ok_and(|s| s.contains("hypr.wisp"))
 }
 
 #[cfg(target_os = "linux")]
@@ -104,8 +168,14 @@ fn lua_str(s: &str) -> String {
 }
 
 #[cfg(target_os = "linux")]
+/// Set the hotkeys up anew. Returns what went wrong, if anything.
+pub fn apply(hotkeys: &BTreeMap<Action, String>, whispers: &[WhisperList]) -> Result<(), String> {
+    if hyprland() { apply_hyprland(hotkeys, whispers) } else { portal::apply(hotkeys, whispers) }
+}
+
+#[cfg(target_os = "linux")]
 /// Write wisp.lua and reload Hyprland. Returns Hyprland's config errors, if any.
-pub fn apply(hotkeys: &BTreeMap<Action, String>, whispers: &[crate::config::WhisperList]) -> Result<(), String> {
+fn apply_hyprland(hotkeys: &BTreeMap<Action, String>, whispers: &[WhisperList]) -> Result<(), String> {
     let exe = crate::desktop::exe();
     let mut out = String::from(
         "-- Generated by Wisp (Settings → Hotkeys). Edits here are overwritten;\n\
@@ -151,6 +221,9 @@ pub fn apply(hotkeys: &BTreeMap<Action, String>, whispers: &[crate::config::Whis
 #[cfg(target_os = "linux")]
 /// Keys other parts of the Hyprland config already use, as normalized specs.
 pub fn taken() -> Vec<(String, String)> {
+    if !hyprland() {
+        return Vec::new();
+    }
     let Ok(out) = Command::new("hyprctl").args(["binds", "-j"]).output() else { return Vec::new() };
     let Ok(binds) = serde_json::from_slice::<Vec<serde_json::Value>>(&out.stdout) else { return Vec::new() };
     binds
@@ -252,5 +325,6 @@ pub fn spec_from_keystroke(key: &str, ctrl: bool, alt: bool, shift: bool, sup: b
 #[cfg(target_os = "linux")]
 /// Push-to-talk wired up by hand in bindings.lua (the G502 F13 button).
 pub fn external_ptt() -> bool {
-    std::fs::read_to_string(hypr_dir().join("bindings.lua")).is_ok_and(|s| s.contains("wisp ptt"))
+    hyprland()
+        && std::fs::read_to_string(hypr_dir().join("bindings.lua")).is_ok_and(|s| s.contains("wisp ptt"))
 }
