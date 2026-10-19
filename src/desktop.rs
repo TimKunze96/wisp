@@ -5,6 +5,10 @@ use std::path::PathBuf;
 #[cfg(target_os = "linux")]
 use std::process::Command;
 
+/// Matches `identifier` in the packager config.
+#[cfg(target_os = "linux")]
+pub const APP_ID: &str = "at.timkunze.wisp";
+
 #[cfg(target_os = "linux")]
 const ICON: &str = include_str!("../assets/wisp.svg");
 
@@ -54,7 +58,10 @@ fn write_if_changed(path: &PathBuf, content: &str) -> bool {
 #[cfg(target_os = "linux")]
 pub fn install() {
     let apps = data_dir().join("applications");
-    let changed = write_if_changed(&apps.join("wisp.desktop"), &entry(false));
+    let mut changed = write_if_changed(&apps.join("wisp.desktop"), &entry(false));
+    // Portals only accept an app id with a desktop file of that name; this
+    // one is hidden so the launcher keeps a single Wisp.
+    changed |= write_if_changed(&apps.join(format!("{APP_ID}.desktop")), &format!("{}NoDisplay=true\n", entry(false)));
     write_if_changed(&data_dir().join("icons/hicolor/scalable/apps/wisp.svg"), ICON);
     if changed {
         let _ = Command::new("update-desktop-database").arg(&apps).output();

@@ -10,16 +10,9 @@ use std::sync::{Mutex, OnceLock};
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 
-use super::Action;
+use super::{Action, Binding, fire};
 use crate::config::{Settings, WhisperList};
-use crate::ctl::{UiRequest, ui};
-use crate::net::{Cmd, Handle};
-
-#[derive(Clone)]
-enum Binding {
-    Action(Action),
-    Whisper(String),
-}
+use crate::net::Handle;
 
 thread_local! {
     static MANAGER: RefCell<Option<(GlobalHotKeyManager, Vec<HotKey>)>> = const { RefCell::new(None) };
@@ -34,6 +27,11 @@ pub fn included() -> bool {
 }
 
 pub const INCLUDE_LINE: &str = "";
+
+pub fn about() -> &'static str {
+    "Hotkeys work everywhere, also while Wisp is in the background. A key another app already \
+     uses as a hotkey can't be taken."
+}
 
 /// The system doesn't say which keys other apps use.
 pub fn taken() -> Vec<(String, String)> {
@@ -62,31 +60,9 @@ pub fn start(net: Handle, settings: &Settings) {
     let _ = apply(&settings.hotkeys, &settings.whisper_lists);
 }
 
-fn fire(binding: Binding, down: bool, net: &Handle) {
-    match binding {
-        Binding::Action(Action::PushToTalk) => net.send(Cmd::Ptt(down)),
-        Binding::Whisper(id) => net.send(Cmd::Whisper(id, down)),
-        _ if !down => {}
-        Binding::Action(Action::ToggleTalk) => net.send(Cmd::TogglePtt),
-        Binding::Action(Action::ShowWindow) => ui(UiRequest::Show),
-        // toggles need the current state, which the control socket has
-        Binding::Action(Action::ToggleMute) => {
-            std::thread::spawn(|| crate::ctl::request("mute"));
-        }
-        Binding::Action(Action::ToggleDeafen) => {
-            std::thread::spawn(|| crate::ctl::request("deafen"));
-        }
-    }
-}
-
 /// Register the hotkeys anew. Returns the ones the system refused.
 pub fn apply(hotkeys: &BTreeMap<Action, String>, whispers: &[WhisperList]) -> Result<(), String> {
-    let mut wanted: Vec<(String, Binding)> = hotkeys
-        .iter()
-        .filter(|(_, k)| !k.trim().is_empty())
-        .map(|(a, k)| (k.clone(), Binding::Action(*a)))
-        .collect();
-    wanted.extend(whispers.iter().filter(|w| !w.hotkey.trim().is_empty()).map(|w| (w.hotkey.clone(), Binding::Whisper(w.id.clone()))));
+    let wanted = super::bindings(hotkeys, whispers);
     MANAGER.with(|m| {
         let mut m = m.borrow_mut();
         if m.is_none() {
