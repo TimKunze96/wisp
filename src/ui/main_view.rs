@@ -140,14 +140,14 @@ impl Render for DragGhost {
             .px_3()
             .h(px(28.))
             .rounded(px(5.))
-            .bg(rgb(RAISED))
+            .bg(rgb(colors().raised))
             .border_1()
-            .border_color(rgba(0xffffff26))
+            .border_color(alpha(ink(), 0x26))
             .shadow_lg()
             .font_family(FONT)
             .text_sm()
-            .text_color(rgb(TEXT))
-            .child(icon(self.icon, 14., MUTED))
+            .text_color(rgb(colors().text))
+            .child(icon(self.icon, 14., colors().muted))
             .child(self.text.clone())
     }
 }
@@ -319,11 +319,11 @@ impl MainView {
                         .gap_4()
                         .p_5()
                         .rounded(px(8.))
-                        .bg(rgb(PANEL))
+                        .bg(rgb(colors().panel))
                         .border_1()
                         .border_color(border())
                         .child(div().font_weight(FontWeight::SEMIBOLD).child(title))
-                        .child(div().text_sm().text_color(rgb(0xc4c8ce)).child(rich.element("host-msg")))
+                        .child(div().text_sm().text_color(rgb(colors().soft)).child(rich.element("host-msg")))
                         .when(mode == 3, |d| d.child(label("The server disconnects you after this message.")))
                         .child(h_flex().justify_end().child(
                             Button::new("host-ok").label("OK").small().primary().on_click(cx.listener(move |this, _, _, cx| {
@@ -393,13 +393,13 @@ impl MainView {
             .w(px(SIDEBAR_W))
             .flex_none()
             .h_full()
-            .bg(rgb(SIDEBAR))
+            .bg(rgb(colors().sidebar))
             .border_r_1()
             .border_color(border())
             .child(
                 header_row().child(logo()).child(div().flex_1()).child({
                     let model = self.model.clone();
-                    icon_button("settings", "settings", MUTED, false)
+                    icon_button("settings", "settings", colors().muted, false)
                         .size(px(28.))
                         .tooltip(|w, cx| Tooltip::new("Settings").build(w, cx))
                         .on_click(move |_, _, cx| open_settings(&model, SettingsTab::Audio, cx))
@@ -422,11 +422,11 @@ impl MainView {
                                 div()
                                     .text_size(px(11.))
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(rgb(DIM))
+                                    .text_color(rgb(colors().dim))
                                     .child("SERVERS"),
                             )
                             .child(
-                                icon_button("add-server", "plus", MUTED, false)
+                                icon_button("add-server", "plus", colors().muted, false)
                                     .size(px(22.))
                                     .tooltip(|w, cx| Tooltip::new("Add server").build(w, cx))
                                     .on_click(move |_, _, cx| open_settings(&model, SettingsTab::Servers, cx)),
@@ -446,12 +446,12 @@ impl MainView {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let (dot, sub) = match server.map(|s| &s.status) {
-            None => (DIM, "Offline".to_string()),
-            Some(Status::Connecting) => (AMBER, "Connecting...".into()),
-            Some(Status::Reconnecting) => (AMBER, "Reconnecting...".into()),
-            Some(Status::Connected) => (GREEN, format!("{} online", server.map(|s| s.users).unwrap_or(0))),
-            Some(Status::NeedsPassword) => (AMBER, "Password needed".into()),
-            Some(Status::Failed(e)) => (RED, e.clone()),
+            None => (colors().dim, "Offline".to_string()),
+            Some(Status::Connecting) => (colors().amber, "Connecting...".into()),
+            Some(Status::Reconnecting) => (colors().amber, "Reconnecting...".into()),
+            Some(Status::Connected) => (colors().green, format!("{} online", server.map(|s| s.users).unwrap_or(0))),
+            Some(Status::NeedsPassword) => (colors().amber, "Password needed".into()),
+            Some(Status::Failed(e)) => (colors().red, e.clone()),
         };
         let is_active = server.is_some_and(|s| Some(s.con) == active);
         let (unread, mention) = server.map(|s| self.server_unread(s)).unwrap_or((0, false));
@@ -486,14 +486,14 @@ impl MainView {
                     .size(px(32.))
                     .flex_none()
                     .rounded(px(6.))
-                    .bg(rgb(RAISED))
+                    .bg(rgb(colors().raised))
                     .flex()
                     .items_center()
                     .justify_center()
                     .relative()
                     .text_size(px(12.))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(rgb(if is_active { TEXT } else { MUTED }))
+                    .text_color(rgb(if is_active { colors().text } else { colors().muted }))
                     .child(initials(&name))
                     .child(
                         div()
@@ -503,7 +503,7 @@ impl MainView {
                             .size(px(10.))
                             .rounded_full()
                             .border_2()
-                            .border_color(rgb(SIDEBAR))
+                            .border_color(rgb(colors().sidebar))
                             .bg(rgb(dot)),
                     ),
             )
@@ -515,15 +515,15 @@ impl MainView {
                         div()
                             .text_sm()
                             .truncate()
-                            .text_color(rgb(if is_active { TEXT } else { 0xc4c8ce }))
+                            .text_color(rgb(if is_active { colors().text } else { colors().soft }))
                             .child(name),
                     )
-                    .child(label(sub).truncate().when(dot == RED, |d| d.text_color(rgb(RED)))),
+                    .child(label(sub).truncate().when(dot == colors().red, |d| d.text_color(rgb(colors().red)))),
             )
             .when(unread > 0, |d| d.child(super::chat_view::pill(unread, mention)))
             .when_some(con.filter(|_| connected), |d, con| {
                 d.child(
-                    icon_button(format!("dc-{con}"), "unplug", MUTED, false)
+                    icon_button(format!("dc-{con}"), "unplug", colors().muted, false)
                         .size(px(24.))
                         .invisible()
                         .group_hover("bm", |s| s.visible())
@@ -549,7 +549,7 @@ impl MainView {
         });
         let (muted, deaf, talking) = (m.snap.self_muted, m.snap.deafened, m.snap.transmitting);
         footer_row()
-            .bg(rgb(SIDEBAR))
+            .bg(rgb(colors().sidebar))
             .child(avatar(&name, my_avatar.as_deref(), 30., talking))
             .child(
                 v_flex()
@@ -565,8 +565,8 @@ impl MainView {
                             _ => "Online".into(),
                         })
                         .truncate()
-                        .when(talking, |d| d.text_color(rgb(GREEN)))
-                        .when(muted, |d| d.text_color(rgb(RED))),
+                        .when(talking, |d| d.text_color(rgb(colors().green)))
+                        .when(muted, |d| d.text_color(rgb(colors().red))),
                     ),
             )
             .child({
@@ -580,12 +580,12 @@ impl MainView {
                     })
             })
             .child(
-                icon_button("self-mute", if muted { "mic-off" } else { "mic" }, if muted { RED } else { MUTED }, muted)
+                icon_button("self-mute", if muted { "mic-off" } else { "mic" }, if muted { colors().red } else { colors().muted }, muted)
                     .tooltip(|w, cx| Tooltip::new("Mute microphone").build(w, cx))
                     .on_click(cx.listener(move |this, _, _, cx| this.send(cx, Cmd::SelfMute(!muted)))),
             )
             .child(
-                icon_button("self-deaf", if deaf { "headphone-off" } else { "headphones" }, if deaf { RED } else { MUTED }, deaf)
+                icon_button("self-deaf", if deaf { "headphone-off" } else { "headphones" }, if deaf { colors().red } else { colors().muted }, deaf)
                     .tooltip(|w, cx| Tooltip::new("Sound off").build(w, cx))
                     .on_click(cx.listener(move |this, _, _, cx| this.send(cx, Cmd::Deafen(!deaf)))),
             )
@@ -633,7 +633,7 @@ impl MainView {
         let con = s.con;
         let name = if s.server_name.is_empty() { s.label.clone() } else { s.server_name.clone() };
         let details = format!("{} · {} {}", s.label, s.platform, s.version.split(' ').next().unwrap_or(""));
-        let dot = || div().size(px(3.)).rounded_full().bg(rgb(DIM));
+        let dot = || div().size(px(3.)).rounded_full().bg(rgb(colors().dim));
         header_row()
             .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).truncate().child(name))
             .child(div().flex_1())
@@ -641,10 +641,10 @@ impl MainView {
                 h_flex()
                     .gap_2()
                     .items_center()
-                    .child(readout(format!("{}/{} online", s.users, s.max_users), MUTED))
+                    .child(readout(format!("{}/{} online", s.users, s.max_users), colors().muted))
                     .when_some(s.ping_ms, |d, p| d.child(dot()).child(readout(format!("{p:.0} ms"), ping_color(p))))
                     .when_some(s.packet_loss.filter(|l| *l >= 0.05), |d, l| {
-                        d.child(dot()).child(readout(format!("{l:.1}% loss"), if l < 5. { AMBER } else { RED }))
+                        d.child(dot()).child(readout(format!("{l:.1}% loss"), if l < 5. { colors().amber } else { colors().red }))
                     }),
             )
             .when_some(s.host_button.clone(), |d, (path, link, tip)| {
@@ -667,10 +667,10 @@ impl MainView {
                 div()
                     .id("server-info")
                     .tooltip(move |w, cx| Tooltip::new(details.clone()).build(w, cx))
-                    .child(icon("info", 14., DIM)),
+                    .child(icon("info", 14., colors().dim)),
             )
             .child(
-                icon_button("filter", "search", if self.filtering { TEXT } else { MUTED }, self.filtering)
+                icon_button("filter", "search", if self.filtering { colors().text } else { colors().muted }, self.filtering)
                     .size(px(26.))
                     .tooltip(|w, cx| Tooltip::new("Filter").build(w, cx))
                     .on_click(cx.listener(|this, _, window, cx| {
@@ -685,13 +685,13 @@ impl MainView {
             )
             .child({
                 let model = self.model.clone();
-                icon_button("admin", "shield", MUTED, false)
+                icon_button("admin", "shield", colors().muted, false)
                     .size(px(26.))
                     .tooltip(|w, cx| Tooltip::new("Server admin").build(w, cx))
                     .on_click(move |_, _, cx| super::open_admin(&model, con, super::AdminTab::ServerGroups, cx))
             })
             .child(
-                icon_button("new-channel", "folder-plus", MUTED, false)
+                icon_button("new-channel", "folder-plus", colors().muted, false)
                     .size(px(26.))
                     .tooltip(|w, cx| Tooltip::new("New channel").build(w, cx))
                     .on_click(cx.listener(move |this, _, window, cx| {
@@ -721,11 +721,11 @@ impl MainView {
                     .px_3()
                     .py_2()
                     .rounded(px(6.))
-                    .bg(rgb(PANEL))
+                    .bg(rgb(colors().panel))
                     .border_1()
                     .border_color(border())
                     .text_xs()
-                    .text_color(rgb(MUTED))
+                    .text_color(rgb(colors().muted))
                     .child(s.welcome.trim().to_string()),
             );
         }
@@ -867,7 +867,7 @@ impl MainView {
                 .right_0()
                 .h(px(2.))
                 .rounded_full()
-                .bg(rgb(ACCENT))
+                .bg(rgb(colors().accent))
                 .when(top, |d| d.top(px(-1.)))
                 .when(!top, |d| d.bottom(px(-1.)))
         };
@@ -886,7 +886,7 @@ impl MainView {
             .flex()
             .justify_center()
             .when(has_children, |d| {
-                d.child(icon(if folded { "chevron-right" } else { "chevron-down" }, 12., DIM))
+                d.child(icon(if folded { "chevron-right" } else { "chevron-down" }, 12., colors().dim))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         cx.stop_propagation();
                         let key = key.clone();
@@ -913,10 +913,10 @@ impl MainView {
             .border_color(rgba(0x00000000))
             .cursor_pointer()
             .when(here || chosen, |d| d.bg(active_bg()))
-            .when(chosen, |d| d.border_color(rgba(0xffffff1f)))
-            .when(cursored, |d| d.border_color(alpha(ACCENT, 0x99)))
+            .when(chosen, |d| d.border_color(alpha(ink(), 0x1f)))
+            .when(cursored, |d| d.border_color(alpha(colors().accent, 0x99)))
             .hover(|d| d.bg(hover_bg()))
-            .when(hint == Some(Zone::Into), |d| d.bg(alpha(ACCENT, 0x1a)).border_color(alpha(ACCENT, 0x80)))
+            .when(hint == Some(Zone::Into), |d| d.bg(alpha(colors().accent, 0x1a)).border_color(alpha(colors().accent, 0x80)))
             .when(hint == Some(Zone::Above), |d| d.child(line(true)))
             .when(hint == Some(Zone::Below), |d| d.child(line(false)))
             .tooltip(|w, cx| Tooltip::new("Double-click to join").build(w, cx))
@@ -980,7 +980,7 @@ impl MainView {
                 d.child(icon(
                     if ch.has_password { "lock" } else if here { "volume-2" } else { "hash" },
                     14.,
-                    if here { ACCENT } else { DIM },
+                    if here { colors().accent } else { colors().dim },
                 ))
             })
             .child(match spacer.map(|(kind, _)| kind) {
@@ -988,11 +988,11 @@ impl MainView {
                     .flex_1()
                     .truncate()
                     .text_sm()
-                    .text_color(rgb(if here { TEXT } else { 0xb3b8c0 }))
+                    .text_color(rgb(if here { colors().text } else { colors().soft }))
                     .when(here, |d| d.font_weight(FontWeight::MEDIUM))
                     .child(name),
                 Some(kind) => {
-                    let text = div().text_sm().text_color(rgb(DIM)).whitespace_nowrap();
+                    let text = div().text_sm().text_color(rgb(colors().dim)).whitespace_nowrap();
                     let row = div().flex_1().min_w_0().overflow_hidden().flex();
                     match kind {
                         Spacer::Left => row.child(text.child(name)),
@@ -1004,7 +1004,7 @@ impl MainView {
                 }
             })
             .when_some(ch.icon.as_ref().and_then(badge), |d, b| d.child(b))
-            .when(ch.is_default, |d| d.child(icon("house", 12., DIM)))
+            .when(ch.is_default, |d| d.child(icon("house", 12., colors().dim)))
             .when(count > 0, |d| {
                 d.child(label(match ch.max_clients {
                     Some(max) => format!("{count}/{max}"),
@@ -1078,7 +1078,7 @@ impl MainView {
             .cursor_pointer()
             .when(selected, |d| d.bg(active_bg()))
             .border_1()
-            .border_color(if cursored { alpha(ACCENT, 0x99) } else { rgba(0x00000000) })
+            .border_color(if cursored { alpha(colors().accent, 0x99) } else { rgba(0x00000000) })
             .hover(|d| d.bg(hover_bg()))
             .on_drag(drag, |d, _, _, cx| cx.new(|_| DragGhost { icon: "user", text: d.name.clone() }))
             // dropping on someone means their channel
@@ -1104,49 +1104,49 @@ impl MainView {
                     .truncate()
                     .text_sm()
                     .text_color(rgb(if cl.whispering {
-                        ACCENT
+                        colors().accent
                     } else if cl.talking {
-                        GREEN
+                        colors().green
                     } else if cl.away.is_some() {
-                        DIM
+                        colors().dim
                     } else {
-                        TEXT
+                        colors().text
                     }))
                     .when(cl.me, |d| d.font_weight(FontWeight::SEMIBOLD))
                     .child(cl.name.clone()),
             )
             .child(badges)
             .when_some(cl.icon.as_ref().and_then(badge), |d, b| d.child(b))
-            .when(cl.friend, |d| d.child(status("star", AMBER)))
-            .when(cl.blocked, |d| d.child(status("ban", DIM)))
+            .when(cl.friend, |d| d.child(status("star", colors().amber)))
+            .when(cl.blocked, |d| d.child(status("ban", colors().dim)))
             .child(div().flex_1())
             .when(cl.whispering, |d| {
                 d.child(
                     div()
                         .id(SharedString::from(format!("wh-{con}-{id}")))
                         .tooltip(|w, cx| Tooltip::new("Whispering to you").build(w, cx))
-                        .child(status("radio", ACCENT)),
+                        .child(status("radio", colors().accent)),
                 )
             })
-            .when(cl.commander, |d| d.child(status("megaphone", MUTED)))
-            .when(cl.priority, |d| d.child(status("zap", MUTED)))
-            .when(cl.recording, |d| d.child(status("circle-dot", RED)))
-            .when(cl.away.is_some(), |d| d.child(status("moon", DIM)))
+            .when(cl.commander, |d| d.child(status("megaphone", colors().muted)))
+            .when(cl.priority, |d| d.child(status("zap", colors().muted)))
+            .when(cl.recording, |d| d.child(status("circle-dot", colors().red)))
+            .when(cl.away.is_some(), |d| d.child(status("moon", colors().dim)))
             .when_some(cl.talk_request.clone(), |d, msg| {
                 let tip = if msg.is_empty() { "Asks for talk power".to_string() } else { format!("Asks for talk power: {msg}") };
                 d.child(
                     div()
                         .id(SharedString::from(format!("tr-{con}-{id}")))
                         .tooltip(move |w, cx| Tooltip::new(tip.clone()).build(w, cx))
-                        .child(status("hand", AMBER)),
+                        .child(status("hand", colors().amber)),
                 )
             })
-            .when(cl.locally_muted, |d| d.child(status("volume-x", RED)))
+            .when(cl.locally_muted, |d| d.child(status("volume-x", colors().red)))
             .when(!cl.locally_muted && (cl.volume - 1.0).abs() > 0.01, |d| {
                 d.child(label(format!("{:.0}%", cl.volume * 100.)))
             })
-            .when(cl.output_muted, |d| d.child(status("headphone-off", RED)))
-            .when(cl.input_muted && !cl.output_muted, |d| d.child(status("mic-off", RED)))
+            .when(cl.output_muted, |d| d.child(status("headphone-off", colors().red)))
+            .when(cl.input_muted && !cl.output_muted, |d| d.child(status("mic-off", colors().red)))
             .context_menu(move |menu, window, cx| user_menu(menu, &data, &menu_model, &view, window, cx))
     }
 
@@ -1164,19 +1164,19 @@ impl MainView {
             (VoiceMode::PushToTalk, ..) => "Push-to-talk".into(),
             (VoiceMode::VoiceActivation, ..) => "Voice activation".into(),
         };
-        let talk_color = if whispering.is_some() { ACCENT } else { GREEN };
+        let talk_color = if whispering.is_some() { colors().accent } else { colors().green };
         footer_row()
             .px_4()
             .child(icon(
                 if muted { "mic-off" } else { "mic" },
                 16.,
-                if muted { RED } else if talking { talk_color } else { MUTED },
+                if muted { colors().red } else if talking { talk_color } else { colors().muted },
             ))
             .child(
                 v_flex()
                     .flex_1()
                     .gap_1p5()
-                    .child(label(status).when(talking, |d| d.text_color(rgb(talk_color))).when(muted, |d| d.text_color(rgb(RED))))
+                    .child(label(status).when(talking, |d| d.text_color(rgb(talk_color))).when(muted, |d| d.text_color(rgb(colors().red))))
                     .child(
                         div()
                             .h(px(3.))
@@ -1184,7 +1184,7 @@ impl MainView {
                             .rounded_full()
                             .overflow_hidden()
                             .relative()
-                            .child(segments(level, if talking { talk_color } else { DIM }))
+                            .child(segments(level, if talking { talk_color } else { colors().dim }))
                             .when(mode == VoiceMode::VoiceActivation, |d| {
                                 d.child(
                                     div()
@@ -1193,7 +1193,7 @@ impl MainView {
                                         .left(gpui_kit::relative(threshold))
                                         .w(px(2.))
                                         .h_full()
-                                        .bg(rgb(MUTED)),
+                                        .bg(rgb(colors().muted)),
                                 )
                             }),
                     ),
@@ -1201,7 +1201,7 @@ impl MainView {
             .child({
                 let rec = snap.recording.clone();
                 let on = rec.is_some();
-                icon_button("record", "circle-dot", if on { RED } else { MUTED }, on)
+                icon_button("record", "circle-dot", if on { colors().red } else { colors().muted }, on)
                     .tooltip(move |w, cx| {
                         let text = match &rec {
                             Some(p) => format!("Recording to {}", p.display()),
@@ -1224,10 +1224,10 @@ impl MainView {
                         .text_sm()
                         .font_weight(FontWeight::MEDIUM)
                         .border_1()
-                        .border_color(if talking { alpha(GREEN, 0x80) } else { border() })
-                        .bg(if talking { alpha(GREEN, 0x1a) } else { rgb(RAISED) })
-                        .text_color(rgb(if talking { GREEN } else { TEXT }))
-                        .hover(|d| d.bg(rgba(0xffffff14)))
+                        .border_color(if talking { alpha(colors().green, 0x80) } else { border() })
+                        .bg(if talking { alpha(colors().green, 0x1a) } else { rgb(colors().raised) })
+                        .text_color(rgb(if talking { colors().green } else { colors().text }))
+                        .hover(|d| d.bg(alpha(ink(), 0x14)))
                         .on_click(cx.listener(move |this, _, _, cx| this.send(cx, Cmd::Ptt(!ptt))))
                         .child(if talking { "Talking" } else { "Talk" }),
                 )
@@ -1247,7 +1247,7 @@ impl MainView {
             let s = m.snap.server(con)?;
             Some((s.clone(), s.channels.iter().find(|c| c.id == id)?.clone()))
         });
-        let panel = v_flex().w(px(RIGHT_W)).flex_none().h_full().bg(rgb(PANEL)).border_l_1().border_color(border());
+        let panel = v_flex().w(px(RIGHT_W)).flex_none().h_full().bg(rgb(colors().panel)).border_l_1().border_color(border());
         match (details, channel) {
             (Some((con, row, d)), _) => panel.child(self.user_panel(con, row, d, window, cx)).into_any_element(),
             (None, Some((s, ch))) => panel.child(self.channel_panel(&s, ch, cx)).into_any_element(),
@@ -1304,26 +1304,26 @@ impl MainView {
         let mut stats = v_flex();
         if let Some(d) = &d {
             if let Some(p) = d.ping_ms {
-                stats = stats.child(stat("Ping", format!("{p:.0} ms"), if ping_color(p) == MUTED { TEXT } else { ping_color(p) }));
+                stats = stats.child(stat("Ping", format!("{p:.0} ms"), if ping_color(p) == colors().muted { colors().text } else { ping_color(p) }));
             }
             if let Some(l) = d.packet_loss {
-                stats = stats.child(stat("Packet loss", format!("{l:.1}%"), if l < 1. { TEXT } else { AMBER }));
+                stats = stats.child(stat("Packet loss", format!("{l:.1}%"), if l < 1. { colors().text } else { colors().amber }));
             }
             if let Some(c) = d.connected_secs {
-                stats = stats.child(stat("Connected", fmt_duration(c), TEXT));
+                stats = stats.child(stat("Connected", fmt_duration(c), colors().text));
             }
-            stats = stats.child(stat("Idle", fmt_duration(d.idle_secs), TEXT));
+            stats = stats.child(stat("Idle", fmt_duration(d.idle_secs), colors().text));
             if !d.version.is_empty() {
-                stats = stats.child(stat("Client", d.version.split(' ').next().unwrap_or("").to_string(), TEXT));
+                stats = stats.child(stat("Client", d.version.split(' ').next().unwrap_or("").to_string(), colors().text));
             }
             if !d.platform.is_empty() {
-                stats = stats.child(stat("Platform", d.platform.clone(), TEXT));
+                stats = stats.child(stat("Platform", d.platform.clone(), colors().text));
             }
         } else {
             stats = stats.child(label("Loading details..."));
         }
         if !row.country.is_empty() {
-            stats = stats.child(stat("Country", row.country.clone(), TEXT));
+            stats = stats.child(stat("Country", row.country.clone(), colors().text));
         }
         let mut groups = v_flex().gap_2();
         for g in &row.groups {
@@ -1342,7 +1342,7 @@ impl MainView {
                 header_row()
                     .child(div().flex_1().text_sm().font_weight(FontWeight::SEMIBOLD).child("Details"))
                     .child(
-                        icon_button("close-user", "x", MUTED, false)
+                        icon_button("close-user", "x", colors().muted, false)
                             .on_click(cx.listener(|this, _, _, cx| this.model.update(cx, |m, cx| m.select(None, cx)))),
                     ),
             )
@@ -1369,11 +1369,11 @@ impl MainView {
                                             (Some(_), _) => "Away".into(),
                                             _ => "Online".into(),
                                         })
-                                        .when(row.talking, |d| d.text_color(rgb(GREEN))),
+                                        .when(row.talking, |d| d.text_color(rgb(colors().green))),
                                     ),
                             ),
                     )
-                    .when_some(description, |el, desc| el.child(div().text_sm().text_color(rgb(MUTED)).child(desc)))
+                    .when_some(description, |el, desc| el.child(div().text_sm().text_color(rgb(colors().muted)).child(desc)))
                     .when(!row.me, |el| {
                         el.child(
                             v_flex()
@@ -1388,7 +1388,7 @@ impl MainView {
                                             div()
                                                 .w(px(40.))
                                                 .text_xs()
-                                                .text_color(rgb(MUTED))
+                                                .text_color(rgb(colors().muted))
                                                 .text_right()
                                                 .child(format!("{:.0}%", row.volume * 100.)),
                                         ),
@@ -1405,10 +1405,10 @@ impl MainView {
                                         .justify_center()
                                         .text_sm()
                                         .border_1()
-                                        .border_color(if muted { alpha(RED, 0x80) } else { border() })
-                                        .bg(if muted { alpha(RED, 0x14) } else { rgb(RAISED) })
-                                        .text_color(rgb(if muted { RED } else { TEXT }))
-                                        .hover(|d| d.bg(rgba(0xffffff14)))
+                                        .border_color(if muted { alpha(colors().red, 0x80) } else { border() })
+                                        .bg(if muted { alpha(colors().red, 0x14) } else { rgb(colors().raised) })
+                                        .text_color(rgb(if muted { colors().red } else { colors().text }))
+                                        .hover(|d| d.bg(alpha(ink(), 0x14)))
                                         .on_click(move |_, _, cx| {
                                             let uid = uid.clone();
                                             model.update(cx, |m, cx| {
@@ -1419,14 +1419,14 @@ impl MainView {
                                                 })
                                             });
                                         })
-                                        .child(icon(if muted { "volume-x" } else { "volume-2" }, 14., if muted { RED } else { MUTED }))
+                                        .child(icon(if muted { "volume-x" } else { "volume-2" }, 14., if muted { colors().red } else { colors().muted }))
                                         .child(if muted { "Unmute for me" } else { "Mute for me" }),
                                 ),
                         )
                     })
                     .when(!row.groups.is_empty(), |el| el.child(v_flex().gap_3().child(section_title("Roles")).child(groups)))
                     .child(v_flex().gap_2().child(section_title("Connection")).child(stats))
-                    .child(label(format!("Server {con} · client {}", row.id)).text_color(rgb(DIM))),
+                    .child(label(format!("Server {con} · client {}", row.id)).text_color(rgb(colors().dim))),
             )
     }
 
@@ -1439,7 +1439,7 @@ impl MainView {
                 .justify_between()
                 .py_1p5()
                 .child(label(name))
-                .child(div().text_xs().text_color(rgb(TEXT)).child(value))
+                .child(div().text_xs().text_color(rgb(colors().text)).child(value))
         };
         let limit = |m: MaxClients, inherited: &str| match m {
             MaxClients::Unlimited => "Unlimited".to_string(),
@@ -1475,7 +1475,7 @@ impl MainView {
             Some(d) => {
                 let rich = super::bbcode::parse(d.trim());
                 (!rich.is_empty()).then(|| {
-                    div().text_sm().text_color(rgb(0xc4c8ce)).child(rich.element(("ch-desc", id as usize))).into_any_element()
+                    div().text_sm().text_color(rgb(colors().soft)).child(rich.element(("ch-desc", id as usize))).into_any_element()
                 })
             }
         };
@@ -1514,9 +1514,9 @@ impl MainView {
                 .text_sm()
                 .border_1()
                 .border_color(border())
-                .bg(rgb(RAISED))
-                .hover(|d| d.bg(rgba(0xffffff14)))
-                .child(icon(icon_name, 14., MUTED))
+                .bg(rgb(colors().raised))
+                .hover(|d| d.bg(alpha(ink(), 0x14)))
+                .child(icon(icon_name, 14., colors().muted))
                 .child(text)
         };
         v_flex()
@@ -1524,7 +1524,7 @@ impl MainView {
             .child(
                 header_row()
                     .child(div().flex_1().text_sm().font_weight(FontWeight::SEMIBOLD).child("Channel"))
-                    .child(icon_button("close-channel", "x", MUTED, false).on_click(
+                    .child(icon_button("close-channel", "x", colors().muted, false).on_click(
                         cx.listener(|this, _, _, cx| this.model.update(cx, |m, cx| m.select_channel(None, cx))),
                     )),
             )
@@ -1594,8 +1594,8 @@ impl Render for MainView {
         h_flex()
             .relative()
             .size_full()
-            .bg(rgb(BG))
-            .text_color(rgb(TEXT))
+            .bg(rgb(colors().bg))
+            .text_color(rgb(colors().text))
             .font_family(FONT)
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| this.on_key(ev, window, cx)))
@@ -1606,7 +1606,7 @@ impl Render for MainView {
                     .h_full()
                     .min_w_0()
                     .when_some(audio_error, |d, e| {
-                        d.child(div().px_4().py_2().bg(alpha(RED, 0x1a)).text_xs().text_color(rgb(RED)).child(e))
+                        d.child(div().px_4().py_2().bg(alpha(colors().red, 0x1a)).text_xs().text_color(rgb(colors().red)).child(e))
                     })
                     .child(self.center(cx)),
             )

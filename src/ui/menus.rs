@@ -35,10 +35,10 @@ fn row(icon_name: &'static str, label: impl Into<String>, color: u32) -> PopupMe
         div()
             .py(px(5.))
             .text_sm()
-            .text_color(rgb(TEXT))
+            .text_color(rgb(colors().text))
             .child(label.clone())
     })
-    .icon(lucide(icon_name, if color == RED { RED } else { MUTED }))
+    .icon(lucide(icon_name, if color == colors().red { colors().red } else { colors().muted }))
 }
 
 /// A group row: the group's own icon (or a placeholder) and its name.
@@ -55,7 +55,7 @@ fn group_row(badge_info: GroupBadge, checked: bool) -> PopupMenuItem {
                     .flex()
                     .justify_center()
                     .child(badge(&badge_info).map(IntoElement::into_any_element).unwrap_or_else(|| {
-                        div().size(px(6.)).rounded_full().bg(rgba(0xffffff33)).into_any_element()
+                        div().size(px(6.)).rounded_full().bg(alpha(ink(), 0x33)).into_any_element()
                     })),
             )
             .child(div().text_sm().child(badge_info.name.clone()))
@@ -286,14 +286,14 @@ impl MainView {
                         .gap_4()
                         .p_5()
                         .rounded(px(8.))
-                        .bg(rgb(PANEL))
+                        .bg(rgb(colors().panel))
                         .border_1()
                         .border_color(border())
                         .shadow_lg()
                         .child(div().font_weight(FontWeight::SEMIBOLD).child(kind.title(&p.name)))
                         .when(kind.has_input(), |d| d.child(Input::new(&p.input)))
                         .when(matches!(kind, PromptKind::MoveChannel { .. }), |d| {
-                            d.child(div().text_sm().text_color(rgb(MUTED)).child(format!(
+                            d.child(div().text_sm().text_color(rgb(colors().muted)).child(format!(
                                 "{} in it or below will move along.",
                                 if p.key == "1" { "1 person is".to_string() } else { format!("{} people are", p.key) }
                             )))
@@ -302,7 +302,7 @@ impl MainView {
                             d.child(
                                 div()
                                     .text_sm()
-                                    .text_color(rgb(MUTED))
+                                    .text_color(rgb(colors().muted))
                                     .child("Everyone in it gets moved out. This can't be undone."),
                             )
                         })
@@ -365,7 +365,7 @@ pub fn user_menu(
     };
 
     let m = model.clone();
-    let mut menu = menu.min_w(px(MENU_WIDTH)).label(name.clone()).item(row("user", "Show details", MUTED).on_click(
+    let mut menu = menu.min_w(px(MENU_WIDTH)).label(name.clone()).item(row("user", "Show details", colors().muted).on_click(
         move |_, _, cx| {
             m.update(cx, |m, cx| m.select(Some((con, id)), cx));
         },
@@ -373,18 +373,18 @@ pub fn user_menu(
 
     if !d.row.me {
         menu = menu
-            .item(row("message-square", "Send message", MUTED).on_click({
+            .item(row("message-square", "Send message", colors().muted).on_click({
                 let (view, uid) = (view.clone(), uid.clone());
                 move |_, w, cx| {
                     let uid = uid.clone();
                     let _ = view.update(cx, |v, cx| v.open_private(con, id, uid, w, cx));
                 }
             }))
-            .item(row("hand", "Poke...", MUTED).on_click(ask(PromptKind::Poke)));
+            .item(row("hand", "Poke...", colors().muted).on_click(ask(PromptKind::Poke)));
 
         let (m, u, muted) = (model.clone(), uid.clone(), d.row.locally_muted);
         menu = menu.item(
-            row(if muted { "volume-2" } else { "volume-x" }, if muted { "Unmute for me" } else { "Mute for me" }, MUTED)
+            row(if muted { "volume-2" } else { "volume-x" }, if muted { "Unmute for me" } else { "Mute for me" }, colors().muted)
                 .on_click(move |_, _, cx| {
                     let u = u.clone();
                     m.update(cx, |m, cx| {
@@ -414,18 +414,18 @@ pub fn user_menu(
         };
         use crate::config::Contact;
         menu = if d.row.friend {
-            menu.item(row("star-off", "Remove friend", MUTED).on_click(contact(None)))
+            menu.item(row("star-off", "Remove friend", colors().muted).on_click(contact(None)))
         } else {
-            menu.item(row("star", "Add as friend", MUTED).on_click(contact(Some(Contact::Friend))))
+            menu.item(row("star", "Add as friend", colors().muted).on_click(contact(Some(Contact::Friend))))
         };
         menu = if d.row.blocked {
-            menu.item(row("circle-check", "Unblock", MUTED).on_click(contact(None)))
+            menu.item(row("circle-check", "Unblock", colors().muted).on_click(contact(None)))
         } else {
-            menu.item(row("ban", "Block", MUTED).on_click(contact(Some(Contact::Blocked))))
+            menu.item(row("ban", "Block", colors().muted).on_click(contact(Some(Contact::Blocked))))
         };
         if (d.row.volume - 1.0).abs() > 0.01 {
             let (m, u) = (model.clone(), uid.clone());
-            menu = menu.item(row("rotate-ccw", "Reset volume", MUTED).on_click(move |_, _, cx| {
+            menu = menu.item(row("rotate-ccw", "Reset volume", colors().muted).on_click(move |_, _, cx| {
                 let u = u.clone();
                 m.update(cx, |m, cx| {
                     m.update_settings(cx, |s| {
@@ -441,21 +441,21 @@ pub fn user_menu(
         if let Some(own) = d.own_channel.filter(|c| *c != d.their_channel) {
             let s = send.clone();
             menu = menu.item(
-                row("arrow-down-to-line", "Move to my channel", MUTED)
+                row("arrow-down-to-line", "Move to my channel", colors().muted)
                     .on_click(move |_, _, cx| s(AdminAction::Move { client: id, channel: own }, cx)),
             );
         }
         let grant = !d.row.talk_power_granted;
         let s = send.clone();
         menu = menu.item(
-            row("mic-vocal", if grant { "Grant talk power" } else { "Revoke talk power" }, MUTED)
+            row("mic-vocal", if grant { "Grant talk power" } else { "Revoke talk power" }, colors().muted)
                 .on_click(move |_, _, cx| s(AdminAction::TalkPower { client: id, grant }, cx)),
         );
     }
 
     if !d.groups.is_empty() {
         let (groups, member, s) = (d.groups.clone(), d.row.group_ids.clone(), send.clone());
-        menu = menu.submenu_with_icon(Some(lucide("shield", MUTED)), "Server groups", window, cx, move |mut sub, _, _| {
+        menu = menu.submenu_with_icon(Some(lucide("shield", colors().muted)), "Server groups", window, cx, move |mut sub, _, _| {
             sub = sub.min_w(px(MENU_WIDTH));
             for g in &groups {
                 let (gid, s, is_member) = (g.id, s.clone(), member.contains(&g.id));
@@ -470,7 +470,7 @@ pub fn user_menu(
     }
     if !d.channel_groups.is_empty() {
         let (groups, current, s) = (d.channel_groups.clone(), d.row.channel_group, send.clone());
-        menu = menu.submenu_with_icon(Some(lucide("users", MUTED)), "Channel group", window, cx, move |mut sub, _, _| {
+        menu = menu.submenu_with_icon(Some(lucide("users", colors().muted)), "Channel group", window, cx, move |mut sub, _, _| {
             sub = sub.min_w(px(MENU_WIDTH));
             for g in &groups {
                 let (gid, s) = (g.id, s.clone());
@@ -486,34 +486,34 @@ pub fn user_menu(
     let (db_id, their) = (d.row.db_id, d.their_channel);
     let (m1, m2, n1, n2) = (model.clone(), model.clone(), name.clone(), name.clone());
     menu = menu
-        .item(row("lock-keyhole", "Permissions...", MUTED).on_click(move |_, _, cx| {
+        .item(row("lock-keyhole", "Permissions...", colors().muted).on_click(move |_, _, cx| {
             super::open_admin(&m1, con, super::AdminTab::Perms(PermTarget::Client(db_id), n1.clone()), cx)
         }))
-        .item(row("list-checks", "Effective permissions...", MUTED).on_click({
+        .item(row("list-checks", "Effective permissions...", colors().muted).on_click({
             let (m, n) = (model.clone(), name.clone());
             move |_, _, cx| super::open_admin(&m, con, super::AdminTab::Overview(their, db_id, n.clone()), cx)
         }))
-        .item(row("lock-keyhole", "Permissions in this channel...", MUTED).on_click(move |_, _, cx| {
+        .item(row("lock-keyhole", "Permissions in this channel...", colors().muted).on_click(move |_, _, cx| {
             let tab = super::AdminTab::Perms(PermTarget::ChannelClient { channel: their, client: db_id }, format!("{n2} in channel"));
             super::open_admin(&m2, con, tab, cx)
         }));
 
     if !d.row.me {
         menu = menu
-            .item(row("mail", "Send offline message...", MUTED).on_click({
+            .item(row("mail", "Send offline message...", colors().muted).on_click({
                 let (m, uid, name) = (model.clone(), uid.clone(), name.clone());
                 move |_, _, cx| super::open_admin(&m, con, super::AdminTab::Inbox(Some((uid.clone(), name.clone()))), cx)
             }))
-            .item(row("flag", "Complain...", MUTED).on_click({
+            .item(row("flag", "Complain...", colors().muted).on_click({
                 // complaints go by database id, not client id
                 let (p, name) = (prompt_fn(view, con, d.row.db_id), name.clone());
                 move |_, w, cx| p(PromptKind::Complain, name.clone(), String::new(), w, cx)
             }))
             .separator()
-            .item(row("log-out", "Kick from channel...", RED).on_click(ask(PromptKind::KickChannel)))
-            .item(row("door-open", "Kick from server...", RED).on_click(ask(PromptKind::KickServer)));
+            .item(row("log-out", "Kick from channel...", colors().red).on_click(ask(PromptKind::KickChannel)))
+            .item(row("door-open", "Kick from server...", colors().red).on_click(ask(PromptKind::KickServer)));
         let (p, name) = (prompt.clone(), name.clone());
-        menu = menu.submenu_with_icon(Some(lucide("ban", RED)), "Ban", window, cx, move |mut sub, _, _| {
+        menu = menu.submenu_with_icon(Some(lucide("ban", colors().red)), "Ban", window, cx, move |mut sub, _, _| {
             sub = sub.min_w(px(200.));
             for (label, secs) in [
                 ("10 minutes", Some(600)),
@@ -524,14 +524,14 @@ pub fn user_menu(
             ] {
                 let (p, name) = (p.clone(), name.clone());
                 sub = sub.item(
-                    row("ban", label, RED).on_click(move |_, w, cx| p(PromptKind::Ban(secs), name.clone(), String::new(), w, cx)),
+                    row("ban", label, colors().red).on_click(move |_, w, cx| p(PromptKind::Ban(secs), name.clone(), String::new(), w, cx)),
                 );
             }
             sub
         });
     }
 
-    menu.separator().item(row("copy", "Copy unique ID", MUTED).on_click(move |_, _, cx| {
+    menu.separator().item(row("copy", "Copy unique ID", colors().muted).on_click(move |_, _, cx| {
         cx.write_to_clipboard(ClipboardItem::new_string(uid.clone()));
     }))
 }
@@ -564,39 +564,39 @@ pub fn channel_menu(
     let m = model.clone();
     let mut menu = menu.min_w(px(MENU_WIDTH)).label(name.clone());
     if !here {
-        menu = menu.item(row("log-in", "Join channel", MUTED).on_click(move |_, _, cx| {
+        menu = menu.item(row("log-in", "Join channel", colors().muted).on_click(move |_, _, cx| {
             m.read(cx).net.send(Cmd::Join { con, channel: id, password: None });
         }));
     }
     let n = name.clone();
-    let mut menu = menu.item(row("copy", "Copy name", MUTED).on_click(move |_, _, cx| {
+    let mut menu = menu.item(row("copy", "Copy name", colors().muted).on_click(move |_, _, cx| {
         cx.write_to_clipboard(ClipboardItem::new_string(n.clone()));
     }));
     let (m, on) = (model.clone(), !ch.subscribed);
-    menu = menu.item(row(if on { "eye" } else { "eye-off" }, if on { "Subscribe" } else { "Unsubscribe" }, MUTED).on_click(
+    menu = menu.item(row(if on { "eye" } else { "eye-off" }, if on { "Subscribe" } else { "Unsubscribe" }, colors().muted).on_click(
         move |_, _, cx| m.read(cx).net.send(Cmd::Admin { con, action: AdminAction::Subscribe { channel: id, on } }),
     ));
     whisper_submenu(menu, WhisperTarget::Channel { path }, model, window, cx)
     .separator()
     .label("Channel settings")
-    .item(row("settings-2", "Edit channel...", MUTED).on_click(editor(Some(ch.clone()))))
-    .item(row("folder", "Files...", MUTED).on_click({
+    .item(row("settings-2", "Edit channel...", colors().muted).on_click(editor(Some(ch.clone()))))
+    .item(row("folder", "Files...", colors().muted).on_click({
         let (m, n) = (model.clone(), ch.name.clone());
         move |_, _, cx| super::open_admin(&m, con, super::AdminTab::Files(id, n.clone()), cx)
     }))
-    .item(row("lock-keyhole", "Permissions...", MUTED).on_click({
+    .item(row("lock-keyhole", "Permissions...", colors().muted).on_click({
         let (m, title) = (model.clone(), format!("Channel {}", ch.name));
         move |_, _, cx| super::open_admin(&m, con, super::AdminTab::Perms(PermTarget::Channel(id), title.clone()), cx)
     }))
-    .item(row("folder-plus", "Create sub-channel...", MUTED).on_click(editor(None)))
-    .item(row("pencil", "Rename...", MUTED).on_click(ask(PromptKind::RenameChannel, name.clone())))
-    .item(row("text-quote", "Set topic...", MUTED).on_click(ask(PromptKind::SetTopic, topic)))
+    .item(row("folder-plus", "Create sub-channel...", colors().muted).on_click(editor(None)))
+    .item(row("pencil", "Rename...", colors().muted).on_click(ask(PromptKind::RenameChannel, name.clone())))
+    .item(row("text-quote", "Set topic...", colors().muted).on_click(ask(PromptKind::SetTopic, topic)))
     .item(
-        row("lock", if ch.has_password { "Change password..." } else { "Set password..." }, MUTED)
+        row("lock", if ch.has_password { "Change password..." } else { "Set password..." }, colors().muted)
             .on_click(ask(PromptKind::SetPassword, String::new())),
     )
     .separator()
-    .item(row("trash", "Delete channel...", RED).on_click(ask(PromptKind::DeleteChannel, String::new())))
+    .item(row("trash", "Delete channel...", colors().red).on_click(ask(PromptKind::DeleteChannel, String::new())))
 }
 
 /// The menu on your own name in the sidebar footer.
@@ -623,33 +623,33 @@ pub fn self_menu(
     menu = match &away {
         Some(_) => {
             let s = send.clone();
-            menu.item(row("sun", "Back", MUTED).on_click(move |_, _, cx| s(Cmd::Away(None), cx)))
-                .item(row("moon", "Change away message...", MUTED).on_click(ask(PromptKind::Away, away.clone().unwrap_or_default())))
+            menu.item(row("sun", "Back", colors().muted).on_click(move |_, _, cx| s(Cmd::Away(None), cx)))
+                .item(row("moon", "Change away message...", colors().muted).on_click(ask(PromptKind::Away, away.clone().unwrap_or_default())))
         }
-        None => menu.item(row("moon", "Set away...", MUTED).on_click(ask(PromptKind::Away, String::new()))),
+        None => menu.item(row("moon", "Set away...", colors().muted).on_click(ask(PromptKind::Away, String::new()))),
     };
     let (Some(con), Some(me)) = (con, me) else { return menu };
     let s = send.clone();
     let commander = me.commander;
     menu = menu.separator().item(
-        row("megaphone", if commander { "Stop being channel commander" } else { "Channel commander" }, MUTED)
+        row("megaphone", if commander { "Stop being channel commander" } else { "Channel commander" }, colors().muted)
             .on_click(move |_, _, cx| s(Cmd::Me { con, action: SelfAction::Commander(!commander) }, cx)),
     );
     menu = match me.talk_request {
         Some(_) => {
             let s = send.clone();
             menu.item(
-                row("hand", "Withdraw talk power request", MUTED)
+                row("hand", "Withdraw talk power request", colors().muted)
                     .on_click(move |_, _, cx| s(Cmd::Me { con, action: SelfAction::TalkRequest(None) }, cx)),
             )
         }
-        None => menu.item(row("hand", "Request talk power...", MUTED).on_click(ask(PromptKind::TalkRequest, String::new()))),
+        None => menu.item(row("hand", "Request talk power...", colors().muted).on_click(ask(PromptKind::TalkRequest, String::new()))),
     };
     let has_avatar = me.avatar.is_some();
     let model = model.clone();
-    menu.item(row("pencil", "Edit description...", MUTED).on_click(ask(PromptKind::Description, String::new())))
+    menu.item(row("pencil", "Edit description...", colors().muted).on_click(ask(PromptKind::Description, String::new())))
         .separator()
-        .item(row("image", "Set avatar...", MUTED).on_click({
+        .item(row("image", "Set avatar...", colors().muted).on_click({
             let model = model.clone();
             move |_, _, cx| {
                 let rx = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
@@ -675,7 +675,7 @@ pub fn self_menu(
             }
         }))
         .when(has_avatar, |menu| {
-            menu.item(row("image-off", "Remove avatar", MUTED).on_click(move |_, _, cx| {
+            menu.item(row("image-off", "Remove avatar", colors().muted).on_click(move |_, _, cx| {
                 model.read(cx).net.send(Cmd::SetAvatar(None))
             }))
         })
@@ -691,7 +691,7 @@ fn whisper_submenu(
 ) -> PopupMenu {
     let lists = model.read(cx).settings.whisper_lists.clone();
     let model = model.clone();
-    menu.submenu_with_icon(Some(lucide("radio", MUTED)), "Whisper lists", window, cx, move |mut sub, _, _| {
+    menu.submenu_with_icon(Some(lucide("radio", colors().muted)), "Whisper lists", window, cx, move |mut sub, _, _| {
         sub = sub.min_w(px(MENU_WIDTH));
         for l in &lists {
             let has = l.targets.contains(&target);
@@ -720,7 +720,7 @@ fn whisper_submenu(
             sub = sub.separator();
         }
         let (m, t) = (model.clone(), target.clone());
-        sub.item(row("plus", "New list with this", MUTED).on_click(move |_, _, cx| {
+        sub.item(row("plus", "New list with this", colors().muted).on_click(move |_, _, cx| {
             let t = t.clone();
             m.update(cx, |m, cx| {
                 m.update_settings(cx, |s| {

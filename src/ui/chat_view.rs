@@ -39,8 +39,8 @@ pub(super) fn pill(n: u64, mention: bool) -> impl IntoElement {
         .justify_center()
         .text_size(px(10.))
         .font_weight(FontWeight::SEMIBOLD)
-        .bg(if mention { rgb(ACCENT) } else { rgb(0x2a2d33) })
-        .text_color(rgb(if mention { BG } else { TEXT }))
+        .bg(if mention { rgb(colors().accent) } else { rgb(super::colors::mix(colors().bg, colors().text, 0.14)) })
+        .text_color(rgb(if mention { colors().bg } else { colors().text }))
         .child(if n > 99 { "99+".to_string() } else { n.to_string() })
 }
 
@@ -143,7 +143,7 @@ impl MainView {
             .rounded(px(5.))
             .cursor_pointer()
             .text_sm()
-            .text_color(rgb(if on { TEXT } else { MUTED }))
+            .text_color(rgb(if on { colors().text } else { colors().muted }))
             .when(on, |d| d.bg(active_bg()))
             .hover(|d| d.bg(hover_bg()))
             .on_click(cx.listener(move |this, _, _, cx| this.set_tab(tab.clone(), cx)))
@@ -155,7 +155,7 @@ impl MainView {
                         .id("close-tab")
                         .rounded(px(3.))
                         .hover(|d| d.bg(hover_bg()))
-                        .child(icon("x", 12., DIM))
+                        .child(icon("x", 12., colors().dim))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             cx.stop_propagation();
                             this.send(cx, Cmd::CloseChat { con, kind: kind.clone() });
@@ -210,7 +210,7 @@ impl MainView {
                         .items_center()
                         .py_1()
                         .child(div().flex_1().h(px(1.)).bg(border()))
-                        .child(div().text_size(px(11.)).text_color(rgb(DIM)).child(day))
+                        .child(div().text_size(px(11.)).text_color(rgb(colors().dim)).child(day))
                         .child(div().flex_1().h(px(1.)).bg(border())),
                 );
             }
@@ -220,12 +220,12 @@ impl MainView {
             let rich = super::bbcode::parse(&l.text);
             let body = div()
                 .text_sm()
-                .text_color(rgb(if l.old { 0xb3b8c0 } else { TEXT }))
+                .text_color(rgb(if l.old { colors().soft } else { colors().text }))
                 .child(rich.element(SharedString::from(format!("line-{i}"))));
             col = col.child(
                 v_flex()
                     .gap_0p5()
-                    .when(l.mention, |d| d.pl_2().border_l_2().border_color(rgb(ACCENT)))
+                    .when(l.mention, |d| d.pl_2().border_l_2().border_color(rgb(colors().accent)))
                     .when(!same, |d| {
                         d.child(
                             h_flex()
@@ -235,10 +235,10 @@ impl MainView {
                                     div()
                                         .text_xs()
                                         .font_weight(FontWeight::SEMIBOLD)
-                                        .text_color(rgb(if l.me { MUTED } else { TEXT }))
+                                        .text_color(rgb(if l.me { colors().muted } else { colors().text }))
                                         .child(l.from.clone()),
                                 )
-                                .child(div().text_size(px(11.)).text_color(rgb(DIM)).child(l.time.clone())),
+                                .child(div().text_size(px(11.)).text_color(rgb(colors().dim)).child(l.time.clone())),
                         )
                     })
                     .child(body),
@@ -259,12 +259,12 @@ impl MainView {
                 h_flex()
                     .gap_3()
                     .items_start()
-                    .child(div().w(px(34.)).flex_none().text_xs().text_color(rgb(DIM)).child(a.time.clone()))
+                    .child(div().w(px(34.)).flex_none().text_xs().text_color(rgb(colors().dim)).child(a.time.clone()))
                     .child(
                         div()
                             .flex_1()
                             .text_xs()
-                            .text_color(rgb(if a.chat { TEXT } else { MUTED }))
+                            .text_color(rgb(if a.chat { colors().text } else { colors().muted }))
                             .child(if multi { format!("{} · {}", a.server, a.text) } else { a.text.clone() }),
                     ),
             );
@@ -297,7 +297,7 @@ impl MainView {
                             div()
                                 .id("offline")
                                 .tooltip(move |w, cx| Tooltip::new("They're offline").build(w, cx))
-                                .child(icon("user-x", 14., DIM)),
+                                .child(icon("user-x", 14., colors().dim)),
                         )
                     }),
             )

@@ -288,13 +288,13 @@ impl SettingsView {
                             .size(px(32.))
                             .flex_none()
                             .rounded(px(6.))
-                            .bg(rgb(RAISED))
+                            .bg(rgb(colors().raised))
                             .flex()
                             .items_center()
                             .justify_center()
                             .text_size(px(12.))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(rgb(MUTED))
+                            .text_color(rgb(colors().muted))
                             .child(initials(&name)),
                     )
                     .child(
@@ -308,7 +308,7 @@ impl SettingsView {
                         h_flex()
                             .gap_1p5()
                             .items_center()
-                            .child(div().size(px(7.)).rounded_full().bg(rgb(GREEN)))
+                            .child(div().size(px(7.)).rounded_full().bg(rgb(colors().green)))
                             .child(label("Connected"))
                             .into_any_element()
                     } else {
@@ -335,13 +335,13 @@ impl SettingsView {
                             .justify_center()
                             .rounded(px(5.))
                             .cursor_pointer()
-                            .hover(|d| d.bg(alpha(RED, 0x1f)))
+                            .hover(|d| d.bg(alpha(colors().red, 0x1f)))
                             .tooltip(|w, cx| Tooltip::new("Remove server").build(w, cx))
                             .on_click(cx.listener(move |t, _, _, cx| {
                                 let id = del_id.clone();
                                 t.model.update(cx, |m, cx| m.update_settings(cx, |s| s.bookmarks.retain(|b| b.id != id)));
                             }))
-                            .child(icon("trash", 14., MUTED)),
+                            .child(icon("trash", 14., colors().muted)),
                     ),
             );
         }
@@ -400,7 +400,7 @@ impl SettingsView {
             h_flex()
                 .gap_4()
                 .items_center()
-                .child(div().w(px(LABEL_W)).flex_none().text_sm().text_color(rgb(MUTED)).child(name))
+                .child(div().w(px(LABEL_W)).flex_none().text_sm().text_color(rgb(colors().muted)).child(name))
                 .child(div().flex_1().child(el))
         };
         v_flex()
@@ -413,13 +413,13 @@ impl SettingsView {
                     .items_center()
                     .cursor_pointer()
                     .text_sm()
-                    .text_color(rgb(MUTED))
-                    .hover(|d| d.text_color(rgb(TEXT)))
+                    .text_color(rgb(colors().muted))
+                    .hover(|d| d.text_color(rgb(colors().text)))
                     .on_click(cx.listener(|t, _, _, cx| {
                         t.form = None;
                         cx.notify();
                     }))
-                    .child(icon("arrow-left", 14., MUTED))
+                    .child(icon("arrow-left", 14., colors().muted))
                     .child("All servers"),
             )
             .child(div().text_lg().font_weight(FontWeight::SEMIBOLD).child(if is_new { "Add server" } else { "Edit server" }))
@@ -522,8 +522,8 @@ impl SettingsView {
                             t.rnnoise_source = crate::audio::rnnoise_source(input.as_deref());
                         }
                     }))
-                    .child(div().w(px(14.)).when(on, |d| d.child(icon("check", 14., TEXT))))
-                    .child(div().text_sm().truncate().text_color(rgb(if on { TEXT } else { 0xb3b8c0 })).child(name)),
+                    .child(div().w(px(14.)).when(on, |d| d.child(icon("check", 14., colors().text))))
+                    .child(div().text_sm().truncate().text_color(rgb(if on { colors().text } else { colors().soft })).child(name)),
             );
         }
         div()
@@ -558,9 +558,9 @@ impl SettingsView {
                 .cursor_pointer()
                 .text_sm()
                 .border_1()
-                .border_color(if on { rgba(0xffffff33) } else { border() })
-                .bg(if on { rgba(0xffffff14) } else { rgba(0x00000000) })
-                .text_color(rgb(if on { TEXT } else { MUTED }))
+                .border_color(if on { alpha(ink(), 0x33) } else { border() })
+                .bg(if on { alpha(ink(), 0x14) } else { rgba(0x00000000) })
+                .text_color(rgb(if on { colors().text } else { colors().muted }))
                 .hover(|d| d.bg(hover_bg()))
                 .child(text)
                 .on_click(cx.listener(move |t, _, _, cx| {
@@ -573,9 +573,9 @@ impl SettingsView {
             .rounded_full()
             .overflow_hidden()
             .relative()
-            .child(segments(level, if open { GREEN } else { MUTED }))
+            .child(segments(level, if open { colors().green } else { colors().muted }))
             .when(s.voice_mode == VoiceMode::VoiceActivation, |d| {
-                d.child(div().absolute().top_0().left(gpui_kit::relative(threshold)).w(px(2.)).h_full().bg(rgb(AMBER)))
+                d.child(div().absolute().top_0().left(gpui_kit::relative(threshold)).w(px(2.)).h_full().bg(rgb(colors().amber)))
             });
         v_flex()
             .gap_8()
@@ -729,10 +729,10 @@ impl SettingsView {
                 .justify_center()
                 .rounded(px(5.))
                 .border_1()
-                .border_color(if recording { rgba(0xffffff55) } else { border() })
-                .bg(if recording { rgba(0xffffff14) } else { rgb(RAISED) })
+                .border_color(if recording { alpha(ink(), 0x55) } else { border() })
+                .bg(if recording { alpha(ink(), 0x14) } else { rgb(colors().raised) })
                 .text_sm()
-                .text_color(rgb(if keys.is_some() || recording { TEXT } else { DIM }))
+                .text_color(rgb(if keys.is_some() || recording { colors().text } else { colors().dim }))
                 .child(if recording {
                     "Press a key...".to_string()
                 } else if keys.is_none() && action == Action::PushToTalk && external {
@@ -750,7 +750,7 @@ impl SettingsView {
                         h_flex()
                             .gap_3()
                             .items_center()
-                            .child(icon(action.icon(), 16., MUTED))
+                            .child(icon(action.icon(), 16., colors().muted))
                             .child(
                                 v_flex()
                                     .flex_1()
@@ -784,7 +784,7 @@ impl SettingsView {
                                     .hover(|d| d.bg(hover_bg()))
                                     .tooltip(|w, cx| Tooltip::new("Clear").build(w, cx))
                                     .on_click(cx.listener(move |t, _, _, cx| t.set_hotkey(Rec::Action(action), None, cx)))
-                                    .child(icon("x", 14., MUTED)),
+                                    .child(icon("x", 14., colors().muted)),
                             ),
                     )
                     .when_some(conflict, |d, c| {
@@ -793,8 +793,8 @@ impl SettingsView {
                                 .pl(px(28.))
                                 .gap_1p5()
                                 .items_center()
-                                .child(icon("triangle-alert", 12., AMBER))
-                                .child(label(format!("Also bound in Hyprland: {c}")).text_color(rgb(AMBER))),
+                                .child(icon("triangle-alert", 12., colors().amber))
+                                .child(label(format!("Also bound in Hyprland: {c}")).text_color(rgb(colors().amber))),
                         )
                     }),
             );
@@ -812,13 +812,13 @@ impl SettingsView {
                         .px_3()
                         .py_2()
                         .rounded(px(6.))
-                        .bg(alpha(AMBER, 0x14))
-                        .child(icon("triangle-alert", 14., AMBER))
-                        .child(label(format!("Add {} to ~/.config/hypr/hyprland.lua", hotkeys::INCLUDE_LINE)).text_color(rgb(AMBER))),
+                        .bg(alpha(colors().amber, 0x14))
+                        .child(icon("triangle-alert", 14., colors().amber))
+                        .child(label(format!("Add {} to ~/.config/hypr/hyprland.lua", hotkeys::INCLUDE_LINE)).text_color(rgb(colors().amber))),
                 )
             })
             .when_some(self.hotkey_error.clone(), |d, e| {
-                d.child(div().px_3().py_2().rounded(px(6.)).bg(alpha(RED, 0x14)).child(label(e).text_color(rgb(RED))))
+                d.child(div().px_3().py_2().rounded(px(6.)).bg(alpha(colors().red, 0x14)).child(label(e).text_color(rgb(colors().red))))
             })
             .child(list)
             .into_any_element()
@@ -952,7 +952,7 @@ impl SettingsView {
                         h_flex()
                             .gap_3()
                             .items_center()
-                            .child(icon("fingerprint-pattern", 16., MUTED))
+                            .child(icon("fingerprint-pattern", 16., colors().muted))
                             .child(div().flex_1().child(Input::new(&self.identity_names[&ident.id])))
                             .child(label(format!("Level {level}")))
                             .child(
@@ -986,12 +986,12 @@ impl SettingsView {
                                         .justify_center()
                                         .rounded(px(5.))
                                         .cursor_pointer()
-                                        .when(confirm, |d| d.bg(alpha(RED, 0x26)))
-                                        .hover(|d| d.bg(alpha(RED, 0x1a)))
+                                        .when(confirm, |d| d.bg(alpha(colors().red, 0x26)))
+                                        .hover(|d| d.bg(alpha(colors().red, 0x1a)))
                                         .tooltip(move |w, cx| {
                                             Tooltip::new(if confirm { "Click again: the key is gone for good" } else { "Delete identity" }).build(w, cx)
                                         })
-                                        .child(icon("trash", 14., RED))
+                                        .child(icon("trash", 14., colors().red))
                                         .on_click(cx.listener(move |t, _, _, cx| {
                                             if t.confirm_delete_identity.as_deref() == Some(id_del.as_str()) {
                                                 crate::identity::delete(&id_del);
@@ -1015,7 +1015,7 @@ impl SettingsView {
                                     .id(("id-copy", n))
                                     .cursor_pointer()
                                     .tooltip(|w, cx| Tooltip::new("Copy unique id").build(w, cx))
-                                    .child(icon("copy", 12., DIM))
+                                    .child(icon("copy", 12., colors().dim))
                                     .on_click(move |_, _, cx| cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(uid.clone()))),
                             ),
                     )
@@ -1037,8 +1037,8 @@ impl SettingsView {
                         .px_3()
                         .py_2()
                         .rounded(px(6.))
-                        .bg(if bad { alpha(RED, 0x14) } else { alpha(GREEN, 0x14) })
-                        .child(label(note).text_color(rgb(if bad { RED } else { GREEN }))),
+                        .bg(if bad { alpha(colors().red, 0x14) } else { alpha(colors().green, 0x14) })
+                        .child(label(note).text_color(rgb(if bad { colors().red } else { colors().green }))),
                 )
             })
             .child(
@@ -1142,8 +1142,8 @@ impl SettingsView {
                         .rounded(px(5.))
                         .border_1()
                         .border_color(border())
-                        .bg(rgb(RAISED))
-                        .child(icon(t.icon(), 13., MUTED))
+                        .bg(rgb(colors().raised))
+                        .child(icon(t.icon(), 13., colors().muted))
                         .child(div().text_sm().child(t.label()))
                         .child(
                             div()
@@ -1152,7 +1152,7 @@ impl SettingsView {
                                 .p_0p5()
                                 .cursor_pointer()
                                 .hover(|d| d.bg(hover_bg()))
-                                .child(icon("x", 12., DIM))
+                                .child(icon("x", 12., colors().dim))
                                 .on_click(cx.listener(move |t, _, _, cx| {
                                     let (id, target) = (id.clone(), t2.clone());
                                     t.model.update(cx, |m, cx| {
@@ -1200,10 +1200,10 @@ impl SettingsView {
                 .justify_center()
                 .rounded(px(5.))
                 .border_1()
-                .border_color(if recording { rgba(0xffffff55) } else { border() })
-                .bg(if recording { rgba(0xffffff14) } else { rgb(RAISED) })
+                .border_color(if recording { alpha(ink(), 0x55) } else { border() })
+                .bg(if recording { alpha(ink(), 0x14) } else { rgb(colors().raised) })
                 .text_sm()
-                .text_color(rgb(if !l.hotkey.is_empty() || recording { TEXT } else { DIM }))
+                .text_color(rgb(if !l.hotkey.is_empty() || recording { colors().text } else { colors().dim }))
                 .child(if recording {
                     "Press a key...".to_string()
                 } else if l.hotkey.is_empty() {
@@ -1223,7 +1223,7 @@ impl SettingsView {
                         h_flex()
                             .gap_3()
                             .items_center()
-                            .child(icon("radio", 16., MUTED))
+                            .child(icon("radio", 16., colors().muted))
                             .child(div().flex_1().child(Input::new(&self.whisper_names[&l.id])))
                             .child(key_chip)
                             .child(
@@ -1253,7 +1253,7 @@ impl SettingsView {
                                         .on_click(cx.listener(move |t, _, _, cx| {
                                             t.set_hotkey(Rec::Whisper(clear_id.clone()), None, cx)
                                         }))
-                                        .child(icon("x", 14., MUTED)),
+                                        .child(icon("x", 14., colors().muted)),
                                 )
                             })
                             .child(
@@ -1265,7 +1265,7 @@ impl SettingsView {
                                     .justify_center()
                                     .rounded(px(5.))
                                     .cursor_pointer()
-                                    .hover(|d| d.bg(alpha(RED, 0x1a)))
+                                    .hover(|d| d.bg(alpha(colors().red, 0x1a)))
                                     .tooltip(|w, cx| Tooltip::new("Delete list").build(w, cx))
                                     .on_click(cx.listener(move |t, _, _, cx| {
                                         let id = del_id.clone();
@@ -1273,7 +1273,7 @@ impl SettingsView {
                                         t.model.update(cx, |m, cx| m.update_settings(cx, |s| s.whisper_lists.retain(|l| l.id != id)));
                                         t.apply_hotkeys(cx);
                                     }))
-                                    .child(icon("trash", 14., RED)),
+                                    .child(icon("trash", 14., colors().red)),
                             ),
                     )
                     .when_some(conflict, |d, c| {
@@ -1281,8 +1281,8 @@ impl SettingsView {
                             h_flex()
                                 .gap_1p5()
                                 .items_center()
-                                .child(icon("triangle-alert", 12., AMBER))
-                                .child(label(format!("Also bound in Hyprland: {c}")).text_color(rgb(AMBER))),
+                                .child(icon("triangle-alert", 12., colors().amber))
+                                .child(label(format!("Also bound in Hyprland: {c}")).text_color(rgb(colors().amber))),
                         )
                     })
                     .child(targets)
@@ -1317,7 +1317,7 @@ impl SettingsView {
                     ))),
             )
             .when_some(self.hotkey_error.clone(), |d, e| {
-                d.child(div().px_3().py_2().rounded(px(6.)).bg(alpha(RED, 0x14)).child(label(e).text_color(rgb(RED))))
+                d.child(div().px_3().py_2().rounded(px(6.)).bg(alpha(colors().red, 0x14)).child(label(e).text_color(rgb(colors().red))))
             })
             .child(col)
             .into_any_element()
@@ -1331,8 +1331,8 @@ impl SettingsView {
                 .gap_4()
                 .pb_1()
                 .child(div().flex_1())
-                .child(div().w(px(60.)).text_xs().text_color(rgb(DIM)).child("Sound"))
-                .child(div().w(px(60.)).text_xs().text_color(rgb(DIM)).child("Popup"))
+                .child(div().w(px(60.)).text_xs().text_color(rgb(colors().dim)).child("Sound"))
+                .child(div().w(px(60.)).text_xs().text_color(rgb(colors().dim)).child("Popup"))
                 .child(div().w(px(30.))),
         );
         for (i, kind) in EventKind::ALL.into_iter().enumerate() {
@@ -1359,7 +1359,7 @@ impl SettingsView {
                             .flex_1()
                             .gap_3()
                             .items_center()
-                            .child(icon(kind.icon(), 15., MUTED))
+                            .child(icon(kind.icon(), 15., colors().muted))
                             .child(div().text_sm().child(kind.title())),
                     )
                     .child(
@@ -1382,7 +1382,7 @@ impl SettingsView {
                             .cursor_pointer()
                             .hover(|d| d.bg(hover_bg()))
                             .tooltip(|w, cx| Tooltip::new("Play").build(w, cx))
-                            .child(icon("play", 13., MUTED))
+                            .child(icon("play", 13., colors().muted))
                             .on_click(cx.listener(move |t, _, _, cx| {
                                 crate::notify::preview(kind, &t.model.read(cx).settings);
                             })),
@@ -1426,9 +1426,20 @@ impl SettingsView {
 
     fn general(&self, cx: &mut Context<Self>) -> AnyElement {
         let tray = self.model.read(cx).settings.close_to_tray;
+        let theme_file = super::colors::path();
+        let theme_file = match dirs::home_dir().and_then(|h| theme_file.strip_prefix(h).ok().map(|p| p.to_path_buf())) {
+            Some(rel) => format!("~/{}", rel.display()),
+            None => theme_file.display().to_string(),
+        };
         v_flex()
             .gap_8()
             .max_w(px(640.))
+            .child(
+                section("Appearance").child(setting_row(
+                    "Theme",
+                    label(format!("Colors come from {theme_file} when it exists and change as soon as the file does.")),
+                )),
+            )
             .child(
                 section("Window").child(setting_row(
                     "Keep running in the tray",
@@ -1510,7 +1521,7 @@ impl SettingsView {
             .w(px(200.))
             .flex_none()
             .h_full()
-            .bg(rgb(SIDEBAR))
+            .bg(rgb(colors().sidebar))
             .border_r_1()
             .border_color(border())
             .child(header_row().child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("Settings")))
@@ -1538,8 +1549,8 @@ impl SettingsView {
                     .when(on, |d| d.bg(active_bg()))
                     .hover(|d| d.bg(hover_bg()))
                     .on_click(cx.listener(move |t, _, window, cx| t.switch(tab, window, cx)))
-                    .child(icon(tab.icon(), 15., if on { TEXT } else { MUTED }))
-                    .child(div().text_sm().text_color(rgb(if on { TEXT } else { 0xb3b8c0 })).child(tab.title())),
+                    .child(icon(tab.icon(), 15., if on { colors().text } else { colors().muted }))
+                    .child(div().text_sm().text_color(rgb(if on { colors().text } else { colors().soft })).child(tab.title())),
             );
         }
         col
@@ -1557,7 +1568,7 @@ fn setting_row(text: impl Into<SharedString>, el: impl IntoElement) -> impl Into
         .gap_4()
         .items_center()
         .min_h(px(30.))
-        .child(div().w(px(LABEL_W)).flex_none().text_sm().text_color(rgb(MUTED)).child(text.into()))
+        .child(div().w(px(LABEL_W)).flex_none().text_sm().text_color(rgb(colors().muted)).child(text.into()))
         .child(div().flex_1().child(el))
 }
 
@@ -1574,8 +1585,8 @@ impl Render for SettingsView {
         };
         h_flex()
             .size_full()
-            .bg(rgb(BG))
-            .text_color(rgb(TEXT))
+            .bg(rgb(colors().bg))
+            .text_color(rgb(colors().text))
             .font_family(FONT)
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|t, ev: &KeyDownEvent, _, cx| t.on_key(ev, cx)))

@@ -84,6 +84,7 @@ fn main() {
             include_bytes!("../assets/fonts/AdwaitaSans-Regular.ttf").as_slice().into(),
             include_bytes!("../assets/fonts/AdwaitaSans-Italic.ttf").as_slice().into(),
         ]);
+        ui::colors::set(ui::colors::load().unwrap_or(ui::colors::WISP));
         ui::apply_theme(cx);
         if !demo {
             desktop::install();

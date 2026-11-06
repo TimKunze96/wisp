@@ -121,8 +121,8 @@ impl IconGrid {
             .rounded(px(5.))
             .cursor_pointer()
             .border_1()
-            .border_color(if on { alpha(ACCENT, 0xaa) } else { border() })
-            .when(on, |d| d.bg(alpha(ACCENT, 0x1a)))
+            .border_color(if on { alpha(colors().accent, 0xaa) } else { border() })
+            .when(on, |d| d.bg(alpha(colors().accent, 0x1a)))
             .hover(|d| d.bg(hover_bg()))
             .on_click(cx.listener(move |t, _, _, cx| {
                 t.current = id;
@@ -130,9 +130,9 @@ impl IconGrid {
                 cx.notify();
             }))
             .child(match (id, path) {
-                (None, _) => icon("x", 14., DIM).into_any_element(),
+                (None, _) => icon("x", 14., colors().dim).into_any_element(),
                 (Some(_), Some(p)) => img(p).size(px(16.)).into_any_element(),
-                (Some(_), None) => div().size(px(6.)).rounded_full().bg(rgb(DIM)).into_any_element(),
+                (Some(_), None) => div().size(px(6.)).rounded_full().bg(rgb(colors().dim)).into_any_element(),
             })
     }
 }
@@ -142,7 +142,7 @@ impl Render for IconGrid {
         let mut grid = h_flex().flex_wrap().gap_1p5().child(self.cell(None, cx));
         match &self.icons {
             None => grid = grid.child(label("Loading icons...")),
-            Some(Err(e)) => grid = grid.child(label(e.clone()).text_color(rgb(RED))),
+            Some(Err(e)) => grid = grid.child(label(e.clone()).text_color(rgb(colors().red))),
             Some(Ok(ids)) => {
                 for id in ids.clone() {
                     grid = grid.child(self.cell(Some(id), cx));
@@ -163,8 +163,8 @@ impl Render for IconGrid {
                 .hover(|d| d.bg(hover_bg()))
                 .tooltip(|w, cx| Tooltip::new("Upload an icon (16×16 works best)").build(w, cx))
                 .on_click(cx.listener(|t, _, _, cx| t.upload(cx)))
-                .child(icon("upload", 14., MUTED)),
+                .child(icon("upload", 14., colors().muted)),
         );
-        v_flex().gap_2().child(grid).when_some(self.error.clone(), |d, e| d.child(label(e).text_color(rgb(RED))))
+        v_flex().gap_2().child(grid).when_some(self.error.clone(), |d, e| d.child(label(e).text_color(rgb(colors().red))))
     }
 }
