@@ -163,9 +163,9 @@ impl MainView {
                 .p_3()
                 .gap_2()
                 .rounded(px(6.))
-                .bg(alpha(ACCENT, 0x14))
+                .bg(alpha(colors().accent, 0x14))
                 .border_1()
-                .border_color(alpha(ACCENT, 0x40))
+                .border_color(alpha(colors().accent, 0x40))
                 .child(
                     h_flex()
                         .gap_2()
@@ -178,7 +178,7 @@ impl MainView {
                                 .child(format!("Wisp {} is out", release.version)),
                         ),
                 )
-                .child(label(text).when(error, |d| d.text_color(rgb(RED))))
+                .child(label(text).when(error, |d| d.text_color(rgb(colors().red))))
                 .child(buttons)
                 .into_any_element(),
         )

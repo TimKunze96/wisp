@@ -146,7 +146,7 @@ impl MainView {
                     .when(on, |d| d.bg(active_bg()))
                     .hover(|d| d.bg(hover_bg()))
                     .on_click(cx.listener(move |t, _, window, cx| t.palette_pick(Some(i), window, cx)))
-                    .child(icon(h.icon, 14., if on { TEXT } else { MUTED }))
+                    .child(icon(h.icon, 14., if on { colors().text } else { colors().muted }))
                     .child(div().flex_1().text_sm().truncate().child(h.title.clone()))
                     .child(label(h.detail.clone())),
             );
@@ -172,7 +172,7 @@ impl MainView {
                         .gap_2()
                         .p_2()
                         .rounded(px(8.))
-                        .bg(rgb(PANEL))
+                        .bg(rgb(colors().panel))
                         .border_1()
                         .border_color(border())
                         .shadow_lg()

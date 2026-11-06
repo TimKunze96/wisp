@@ -5,17 +5,7 @@ use gpui_kit::{Div, FontWeight, IntoElement, ParentElement, Rgba, SharedString, 
 
 use crate::net::GroupBadge;
 
-pub const BG: u32 = 0x0c0d0f;
-pub const SIDEBAR: u32 = 0x101114;
-pub const PANEL: u32 = 0x101114;
-pub const RAISED: u32 = 0x17191d;
-pub const TEXT: u32 = 0xe3e5e8;
-pub const MUTED: u32 = 0x8b9098;
-pub const DIM: u32 = 0x5b6069;
-pub const ACCENT: u32 = 0x8fb3d9;
-pub const GREEN: u32 = 0x5fc98a;
-pub const RED: u32 = 0xe06c75;
-pub const AMBER: u32 = 0xd8b26a;
+pub use super::colors::{colors, ink};
 
 pub const FONT: &str = "Adwaita Sans";
 
@@ -25,7 +15,7 @@ pub const HEADER_H: f32 = 52.;
 pub const FOOTER_H: f32 = 56.;
 
 pub fn border() -> Rgba {
-    rgba(0xffffff12)
+    alpha(ink(), 0x12)
 }
 
 pub fn alpha(c: u32, a: u8) -> Rgba {
@@ -33,11 +23,11 @@ pub fn alpha(c: u32, a: u8) -> Rgba {
 }
 
 pub fn hover_bg() -> Rgba {
-    rgba(0xffffff0a)
+    alpha(ink(), 0x0a)
 }
 
 pub fn active_bg() -> Rgba {
-    rgba(0xffffff10)
+    alpha(ink(), 0x10)
 }
 
 /// A Lucide icon from the bundled set (`assets/icons/<name>.svg`).
@@ -51,7 +41,7 @@ pub fn icon(name: &str, size: f32, color: u32) -> impl IntoElement {
 
 /// Small muted caption.
 pub fn label(text: impl Into<SharedString>) -> Div {
-    div().text_xs().text_color(rgb(MUTED)).child(text.into())
+    div().text_xs().text_color(rgb(colors().muted)).child(text.into())
 }
 
 /// Section header: small uppercase title and a hairline.
@@ -64,7 +54,7 @@ pub fn section_title(text: &str) -> Div {
             div()
                 .text_size(px(11.))
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_color(rgb(DIM))
+                .text_color(rgb(colors().dim))
                 .child(text.to_uppercase()),
         )
         .child(div().flex_1().h(px(1.)).bg(border()))
@@ -118,15 +108,15 @@ pub fn avatar(name: &str, image: Option<&std::path::Path>, size: f32, talking: b
         .flex()
         .items_center()
         .justify_center()
-        .bg(rgb(RAISED))
+        .bg(rgb(colors().raised))
         .border_1()
-        .border_color(if talking { rgb(GREEN) } else { border() });
+        .border_color(if talking { rgb(colors().green) } else { border() });
     match image {
         Some(path) => base.child(img(path.to_path_buf()).size_full().rounded_full()),
         None => base
             .text_size(px(size * 0.38))
             .font_weight(FontWeight::SEMIBOLD)
-            .text_color(rgb(if talking { GREEN } else { MUTED }))
+            .text_color(rgb(if talking { colors().green } else { colors().muted }))
             .child(initials(name)),
     }
 }
@@ -144,7 +134,7 @@ pub fn badge(b: &GroupBadge) -> Option<Div> {
             100 | 200 => "shield",
             _ => "badge",
         };
-        div().child(icon(name, 14., MUTED))
+        div().child(icon(name, 14., colors().muted))
     } else {
         return None;
     };
@@ -153,14 +143,14 @@ pub fn badge(b: &GroupBadge) -> Option<Div> {
 
 /// Quiet stat text, e.g. "15 ms". Coloured only when it signals a problem.
 pub fn readout(text: impl Into<SharedString>, color: u32) -> Div {
-    div().text_xs().text_color(rgb(if color == GREEN || color == ACCENT { MUTED } else { color })).child(text.into())
+    div().text_xs().text_color(rgb(if color == colors().green || color == colors().accent { colors().muted } else { color })).child(text.into())
 }
 
 /// Thin level meter (0..1).
 pub fn segments(level: f32, color: u32) -> Div {
     div()
         .size_full()
-        .bg(rgb(RAISED))
+        .bg(rgb(colors().raised))
         .child(div().h_full().w(gpui_kit::relative(level)).bg(rgb(color)))
 }
 
@@ -187,11 +177,11 @@ pub fn logo() -> Div {
 
 pub fn ping_color(ms: f32) -> u32 {
     if ms < 80. {
-        MUTED
+        colors().muted
     } else if ms < 150. {
-        AMBER
+        colors().amber
     } else {
-        RED
+        colors().red
     }
 }
 
@@ -221,9 +211,9 @@ pub fn chip(id: impl Into<gpui_kit::ElementId>, text: impl Into<SharedString>, o
         .cursor_pointer()
         .text_sm()
         .border_1()
-        .border_color(if on { rgba(0xffffff33) } else { border() })
-        .bg(if on { rgba(0xffffff14) } else { rgba(0x00000000) })
-        .text_color(rgb(if on { TEXT } else { MUTED }))
+        .border_color(if on { alpha(ink(), 0x33) } else { border() })
+        .bg(if on { alpha(ink(), 0x14) } else { rgba(0x00000000) })
+        .text_color(rgb(if on { colors().text } else { colors().muted }))
         .hover(|d| d.bg(hover_bg()))
         .child(text.into())
 }

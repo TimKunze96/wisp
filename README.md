@@ -61,9 +61,42 @@ And some extras I found useful:
 - Turning other apps down while someone talks
 - Recording to Ogg Opus
 - Ctrl+K to jump to any server, channel or person
+- Themes from a JSON file that's reloaded live, so it can follow your desktop theme
 - Friends and blocked people, notifications, sounds and spoken events
 - Tray icon, `ts3server://` links, autostart, and a command line for scripts
   and key bindings (`wisp status`, `wisp join`, `wisp ptt down`, see `wisp help`)
+
+## Themes
+
+Wisp reads its colors from `~/.config/wisp/theme.json` and reloads it whenever
+the file changes. Without the file it uses its own palette. Every key is
+optional; shades you leave out are mixed from `background` and `text`.
+
+```json
+{
+  "mode": "dark",
+  "background": "#0c0d0f",
+  "panel": "#101114",
+  "raised": "#17191d",
+  "text": "#e3e5e8",
+  "soft": "#b3b8c0",
+  "muted": "#8b9098",
+  "dim": "#5b6069",
+  "accent": "#8fb3d9",
+  "talking": "#5fc98a",
+  "danger": "#e06c75",
+  "warning": "#d8b26a"
+}
+```
+
+To follow a desktop theme, have the theme switcher write that file, or point a
+symlink at a file it renders. On Omarchy:
+
+```sh
+cp extras/omarchy/wisp.json.tpl ~/.config/omarchy/themed/
+omarchy theme refresh
+ln -sf ~/.local/state/omarchy/current/theme/wisp.json ~/.config/wisp/theme.json
+```
 
 ## Status
 

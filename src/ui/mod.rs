@@ -7,6 +7,7 @@ mod icons;
 mod palette;
 mod channel_edit;
 mod chat_view;
+pub mod colors;
 mod main_view;
 mod menus;
 mod settings;
@@ -106,6 +107,7 @@ pub fn start(
         update: None,
     });
     updater::start(&model, cx);
+    theme::watch(cx);
 
     let m = model.clone();
     cx.spawn(async move |cx| {

@@ -11,7 +11,6 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
     AnyElement, AppContext, Context, Entity, ExternalPaths, InteractiveElement, IntoElement,
     ParentElement, PathPromptOptions, Render, SharedString, StatefulInteractiveElement, Styled, Window, div, px, rgb,
-    rgba,
 };
 use tokio::sync::oneshot;
 
@@ -216,34 +215,34 @@ impl FilesView {
             .when(is_dir, |d| {
                 d.cursor_pointer().on_click(cx.listener(move |t, _, _, cx| t.open(open_path.clone(), cx)))
             })
-            .child(icon(if is_dir { "folder" } else { "file" }, 16., if is_dir { ACCENT } else { MUTED }))
+            .child(icon(if is_dir { "folder" } else { "file" }, 16., if is_dir { colors().accent } else { colors().muted }))
             .child(if renaming {
                 div().flex_1().child(Input::new(&self.name_input).small()).into_any_element()
             } else {
                 div().flex_1().min_w_0().text_sm().truncate().child(name.clone()).into_any_element()
             })
-            .child(div().w(px(80.)).text_xs().text_color(rgb(MUTED)).text_right().child(if is_dir { String::new() } else { size_text(f.size) }))
-            .child(div().w(px(120.)).text_xs().text_color(rgb(DIM)).text_right().child(f.date.clone()))
+            .child(div().w(px(80.)).text_xs().text_color(rgb(colors().muted)).text_right().child(if is_dir { String::new() } else { size_text(f.size) }))
+            .child(div().w(px(120.)).text_xs().text_color(rgb(colors().dim)).text_right().child(f.date.clone()))
             .child(
                 h_flex()
                     .gap_0p5()
                     .w(px(96.))
                     .justify_end()
                     .when(!is_dir, |d| {
-                        d.child(btn(("fdl", i), "download", MUTED, "Download").on_click(cx.listener(move |t, _, _, cx| {
+                        d.child(btn(("fdl", i), "download", colors().muted, "Download").on_click(cx.listener(move |t, _, _, cx| {
                             cx.stop_propagation();
                             let to = download_path(dl_path.rsplit('/').next().unwrap_or(&dl_path));
                             let password = t.password(cx);
                             t.send(FileCmd::Download { channel: t.channel, password, path: dl_path.clone(), to }, cx);
                         })))
                     })
-                    .child(btn(("frn", i), "pencil", MUTED, "Rename").on_click(cx.listener(move |t, _, window, cx| {
+                    .child(btn(("frn", i), "pencil", colors().muted, "Rename").on_click(cx.listener(move |t, _, window, cx| {
                         cx.stop_propagation();
                         t.start_naming(rn_name.clone(), window, cx);
                     })))
                     .child(
-                        btn(("fdel", i), "trash", RED, if confirm { "Click again to delete" } else { "Delete" })
-                            .when(confirm, |d| d.bg(alpha(RED, 0x26)))
+                        btn(("fdel", i), "trash", colors().red, if confirm { "Click again to delete" } else { "Delete" })
+                            .when(confirm, |d| d.bg(alpha(colors().red, 0x26)))
                             .on_click(cx.listener(move |t, _, _, cx| {
                                 cx.stop_propagation();
                                 let name = del_path.rsplit('/').next().unwrap_or("").to_string();
@@ -271,11 +270,11 @@ impl FilesView {
         for t in list.iter().rev() {
             let frac = if t.size > 0 { (t.done as f32 / t.size as f32).clamp(0., 1.) } else { 0. };
             let (status, color) = match &t.state {
-                TransferState::Waiting => ("Waiting".to_string(), MUTED),
-                TransferState::Running => (format!("{} of {}", size_text(t.done), size_text(t.size)), MUTED),
-                TransferState::Done if t.upload => ("Uploaded".into(), GREEN),
-                TransferState::Done => (format!("Saved to {}", t.local.display()), GREEN),
-                TransferState::Failed(e) => (format!("Failed: {e}"), RED),
+                TransferState::Waiting => ("Waiting".to_string(), colors().muted),
+                TransferState::Running => (format!("{} of {}", size_text(t.done), size_text(t.size)), colors().muted),
+                TransferState::Done if t.upload => ("Uploaded".into(), colors().green),
+                TransferState::Done => (format!("Saved to {}", t.local.display()), colors().green),
+                TransferState::Failed(e) => (format!("Failed: {e}"), colors().red),
             };
             let local = t.local.clone();
             col = col.child(
@@ -285,7 +284,7 @@ impl FilesView {
                         h_flex()
                             .gap_2()
                             .items_center()
-                            .child(icon(if t.upload { "upload" } else { "download" }, 13., MUTED))
+                            .child(icon(if t.upload { "upload" } else { "download" }, 13., colors().muted))
                             .child(div().flex_1().text_sm().truncate().child(t.name.clone()))
                             .child(label(status).text_color(rgb(color)).truncate().max_w(px(380.)))
                             .when(t.state == TransferState::Done && !t.upload, |d| {
@@ -294,7 +293,7 @@ impl FilesView {
                                         .id(SharedString::from(format!("show-{}", t.id)))
                                         .cursor_pointer()
                                         .tooltip(|w, cx| Tooltip::new("Show in folder").build(w, cx))
-                                        .child(icon("folder-open", 13., MUTED))
+                                        .child(icon("folder-open", 13., colors().muted))
                                         .on_click(move |_, _, cx| {
                                             if let Some(dir) = local.parent() {
                                                 cx.open_with_system(dir);
@@ -304,7 +303,7 @@ impl FilesView {
                             }),
                     )
                     .when(matches!(t.state, TransferState::Running | TransferState::Waiting), |d| {
-                        d.child(div().h(px(3.)).w_full().rounded_full().overflow_hidden().child(segments(frac, ACCENT)))
+                        d.child(div().h(px(3.)).w_full().rounded_full().overflow_hidden().child(segments(frac, colors().accent)))
                     }),
             );
         }
@@ -335,7 +334,7 @@ impl Render for FilesView {
         for (i, part) in parts.iter().enumerate() {
             if i > 0 {
                 acc = format!("{acc}/{part}");
-                crumbs = crumbs.child(icon("chevron-right", 12., DIM));
+                crumbs = crumbs.child(icon("chevron-right", 12., colors().dim));
             }
             let target = if acc.is_empty() { "/".to_string() } else { acc.clone() };
             let last = i == parts.len() - 1;
@@ -346,7 +345,7 @@ impl Render for FilesView {
                     .py_0p5()
                     .rounded(px(4.))
                     .text_sm()
-                    .text_color(rgb(if last { TEXT } else { MUTED }))
+                    .text_color(rgb(if last { colors().text } else { colors().muted }))
                     .when(!last, |d| d.cursor_pointer().hover(|d| d.bg(hover_bg())))
                     .on_click(cx.listener(move |t, _, _, cx| t.open(target.clone(), cx)))
                     .child(if i == 0 { "Files".to_string() } else { part.clone() }),
@@ -360,13 +359,13 @@ impl Render for FilesView {
                     .items_center()
                     .h(px(38.))
                     .px_2()
-                    .child(icon("folder-plus", 16., ACCENT))
+                    .child(icon("folder-plus", 16., colors().accent))
                     .child(div().flex_1().child(Input::new(&self.name_input).small())),
             );
         }
         match &self.entries {
             None => list = list.child(label("Loading...")),
-            Some(Err(e)) => list = list.child(label(e.clone()).text_color(rgb(RED))),
+            Some(Err(e)) => list = list.child(label(e.clone()).text_color(rgb(colors().red))),
             Some(Ok(e)) if e.is_empty() => {
                 list = list.child(div().py_6().flex().justify_center().child(label("No files here. Drop files on this window to upload them.")))
             }
@@ -380,7 +379,7 @@ impl Render for FilesView {
             .id("files-drop")
             .gap_4()
             .rounded(px(6.))
-            .drag_over::<ExternalPaths>(|s, _, _, _| s.bg(rgba(0x8fb3d914)))
+            .drag_over::<ExternalPaths>(|s, _, _, _| s.bg(alpha(colors().accent, 0x14)))
             .on_drop(cx.listener(|t, paths: &ExternalPaths, _, cx| t.upload(paths.paths().to_vec(), cx)))
             .child(
                 h_flex()

@@ -333,7 +333,7 @@ impl ChannelEditor {
             .gap_4()
             .items_center()
             .min_h(px(32.))
-            .child(div().w(px(LABEL_W)).flex_none().text_sm().text_color(rgb(MUTED)).child(text))
+            .child(div().w(px(LABEL_W)).flex_none().text_sm().text_color(rgb(colors().muted)).child(text))
             .child(div().flex_1().min_w_0().child(el))
     }
 
@@ -428,7 +428,7 @@ impl Render for ChannelEditor {
                 h_flex()
                     .gap_4()
                     .items_start()
-                    .child(div().w(px(LABEL_W)).flex_none().pt_1p5().text_sm().text_color(rgb(MUTED)).child("Description"))
+                    .child(div().w(px(LABEL_W)).flex_none().pt_1p5().text_sm().text_color(rgb(colors().muted)).child("Description"))
                     .child(div().flex_1().min_w_0().child(Textarea::new(&self.description))),
             )
             .child(self.field("Password", Input::new(&self.password).mask_toggle()))
@@ -519,7 +519,7 @@ impl Render for ChannelEditor {
             .w(px(580.))
             .max_h(gpui_kit::relative(0.9))
             .rounded(px(8.))
-            .bg(rgb(PANEL))
+            .bg(rgb(colors().panel))
             .border_1()
             .border_color(border())
             .shadow_lg()
@@ -542,7 +542,7 @@ impl Render for ChannelEditor {
             .child(
                 footer_row()
                     .px_5()
-                    .when_some(self.error.clone(), |d, e| d.child(div().text_xs().text_color(rgb(RED)).child(e)))
+                    .when_some(self.error.clone(), |d, e| d.child(div().text_xs().text_color(rgb(colors().red)).child(e)))
                     .child(div().flex_1())
                     .child(Button::new("ce-cancel").label("Cancel").small().ghost().on_click(cx.listener(|_, _, _, cx| {
                         cx.emit(DismissEvent);

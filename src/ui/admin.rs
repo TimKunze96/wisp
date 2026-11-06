@@ -13,7 +13,7 @@ use gpui_kit::component::{Sizable, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
     AnyElement, App, AppContext, ClipboardItem, Context, Entity, FontWeight, InteractiveElement, IntoElement,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window, div, px, rgb, rgba,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 use tokio::sync::oneshot;
 
@@ -116,7 +116,7 @@ fn value(e: &Entity<InputState>, cx: &App) -> String {
 }
 
 fn error_box(e: &str) -> AnyElement {
-    div().px_3().py_2().rounded(px(6.)).bg(alpha(RED, 0x14)).child(label(e.to_string()).text_color(rgb(RED))).into_any_element()
+    div().px_3().py_2().rounded(px(6.)).bg(alpha(colors().red, 0x14)).child(label(e.to_string()).text_color(rgb(colors().red))).into_any_element()
 }
 
 fn icon_btn(id: impl Into<gpui_kit::ElementId>, name: &'static str, color: u32, tip: &'static str) -> gpui_kit::Stateful<gpui_kit::Div> {
@@ -256,7 +256,7 @@ impl PermEditor {
             .rounded(px(5.))
             .cursor_pointer()
             .text_sm()
-            .text_color(rgb(if current.is_some() { TEXT } else { DIM }))
+            .text_color(rgb(if current.is_some() { colors().text } else { colors().dim }))
             .hover(|d| d.bg(hover_bg()))
             .child(current.map(|v| v.to_string()).unwrap_or_else(|| "–".into()))
             .on_click(cx.listener(move |t, _, window, cx| t.start_edit(id, current, window, cx)))
@@ -300,18 +300,18 @@ impl Render for PermEditor {
                     .min_h(px(40.))
                     .py_1()
                     .border_b_1()
-                    .border_color(rgba(0xffffff08))
+                    .border_color(alpha(ink(), 0x08))
                     .child(
                         v_flex()
                             .flex_1()
                             .min_w_0()
-                            .child(div().text_sm().truncate().text_color(rgb(if set.is_some() { TEXT } else { MUTED })).child(p.name.clone()))
+                            .child(div().text_sm().truncate().text_color(rgb(if set.is_some() { colors().text } else { colors().muted })).child(p.name.clone()))
                             .when(!p.description.is_empty(), |d| d.child(label(p.description.clone()).truncate())),
                     )
                     .child(div().w(px(90.)).flex().justify_end().child(self.value_cell(id, set, boolean, cx)))
                     .when(grants, |d| d.child(div().w(px(90.)).child(self.value_cell(id | 0x8000, grant, false, cx))))
                     .child(div().w(px(28.)).when(set.is_some() || grant.is_some(), |d| {
-                        d.child(icon_btn(("pdel", id as usize), "x", MUTED, "Remove").on_click(cx.listener(move |t, _, _, cx| {
+                        d.child(icon_btn(("pdel", id as usize), "x", colors().muted, "Remove").on_click(cx.listener(move |t, _, _, cx| {
                             let target = t.target;
                             if let Some(Ok(v)) = &mut t.values {
                                 v.remove(&id);
@@ -641,7 +641,7 @@ impl AdminView {
                     .hover(|d| d.bg(hover_bg()))
                     .on_click(cx.listener(move |t, _, window, cx| t.pick_group(id, window, cx)))
                     .child(div().w(px(16.)).flex().justify_center().children(badge(b)))
-                    .child(div().text_sm().truncate().text_color(rgb(if on { TEXT } else { 0xb3b8c0 })).child(b.name.clone())),
+                    .child(div().text_sm().truncate().text_color(rgb(if on { colors().text } else { colors().soft })).child(b.name.clone())),
             );
         }
         let left = v_flex()
@@ -696,7 +696,7 @@ impl AdminView {
                 let name = format!("{} (copy)", value(&t.group_name, cx));
                 t.write(AdminWrite::CopyGroup { kind, from: group, name }, cx);
             })))
-            .child(icon_btn("grp-del", "trash", RED, "Delete group").on_click(cx.listener(move |t, _, _, cx| {
+            .child(icon_btn("grp-del", "trash", colors().red, "Delete group").on_click(cx.listener(move |t, _, _, cx| {
                 t.write(AdminWrite::DelGroup { kind, id: group }, cx);
                 t.group = None;
                 t.perms = None;
@@ -717,11 +717,11 @@ impl AdminView {
                                 .items_center()
                                 .h(px(34.))
                                 .border_b_1()
-                                .border_color(rgba(0xffffff08))
+                                .border_color(alpha(ink(), 0x08))
                                 .child(avatar(&mem.name, None, 22., false))
                                 .child(div().flex_1().text_sm().truncate().child(mem.name.clone()))
                                 .child(label(mem.uid.clone()).truncate().max_w(px(220.)))
-                                .child(icon_btn(("mrm", i), "user-minus", RED, "Remove from group").on_click(cx.listener(
+                                .child(icon_btn(("mrm", i), "user-minus", colors().red, "Remove from group").on_click(cx.listener(
                                     move |t, _, _, cx| {
                                         t.write(AdminWrite::RemoveMember { group, db_id }, cx);
                                         later(cx, |t: &mut Self, cx| t.load_members(cx));
@@ -841,7 +841,7 @@ impl AdminView {
                             .items_center()
                             .py_2()
                             .border_b_1()
-                            .border_color(rgba(0xffffff08))
+                            .border_color(alpha(ink(), 0x08))
                             .child(
                                 v_flex()
                                     .flex_1()
@@ -856,7 +856,7 @@ impl AdminView {
                                     )).truncate()),
                             )
                             .child(label(human(ban.secs)))
-                            .child(icon_btn(("unban", id as usize), "x", MUTED, "Remove ban").on_click(cx.listener(
+                            .child(icon_btn(("unban", id as usize), "x", colors().muted, "Remove ban").on_click(cx.listener(
                                 move |t, _, _, cx| {
                                     t.write(AdminWrite::DelBan { id }, cx);
                                     later(cx, |t: &mut Self, cx| t.load_bans(cx));
@@ -980,7 +980,7 @@ impl AdminView {
                             .items_center()
                             .py_2()
                             .border_b_1()
-                            .border_color(rgba(0xffffff08))
+                            .border_color(alpha(ink(), 0x08))
                             .child(
                                 v_flex()
                                     .flex_1()
@@ -993,10 +993,10 @@ impl AdminView {
                                         if key.description.is_empty() { String::new() } else { format!(" · {}", key.description) }
                                     )).truncate()),
                             )
-                            .child(icon_btn(("kcopy", i), "copy", MUTED, "Copy key").on_click(move |_, _, cx| {
+                            .child(icon_btn(("kcopy", i), "copy", colors().muted, "Copy key").on_click(move |_, _, cx| {
                                 cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()));
                             }))
-                            .child(icon_btn(("kdel", i), "trash", RED, "Delete key").on_click(cx.listener(move |t, _, _, cx| {
+                            .child(icon_btn(("kdel", i), "trash", colors().red, "Delete key").on_click(cx.listener(move |t, _, _, cx| {
                                 t.write(AdminWrite::DelToken { token: token.clone() }, cx);
                                 later(cx, |t: &mut Self, cx| t.load_keys(cx));
                             }))),
@@ -1033,7 +1033,7 @@ impl AdminView {
                             .items_center()
                             .py_2()
                             .border_b_1()
-                            .border_color(rgba(0xffffff08))
+                            .border_color(alpha(ink(), 0x08))
                             .child(
                                 v_flex()
                                     .flex_1()
@@ -1041,7 +1041,7 @@ impl AdminView {
                                     .child(div().text_sm().child(format!("{} about {}", x.from, x.target)))
                                     .child(label(format!("{} · {}", x.time, x.message))),
                             )
-                            .child(icon_btn(("cdel", i), "x", MUTED, "Remove").on_click(cx.listener(move |t, _, _, cx| {
+                            .child(icon_btn(("cdel", i), "x", colors().muted, "Remove").on_click(cx.listener(move |t, _, _, cx| {
                                 t.write(AdminWrite::DelComplaint { target, from }, cx);
                                 later(cx, |t: &mut Self, cx| t.load_complaints(cx));
                             }))),
@@ -1153,7 +1153,7 @@ impl AdminView {
                 .gap_4()
                 .items_center()
                 .min_h(px(32.))
-                .child(div().w(px(190.)).flex_none().text_sm().text_color(rgb(MUTED)).child(text))
+                .child(div().w(px(190.)).flex_none().text_sm().text_color(rgb(colors().muted)).child(text))
                 .child(div().flex_1().min_w_0().child(el))
         };
         let mut form = v_flex().gap_2();
@@ -1186,7 +1186,7 @@ impl AdminView {
                             .py_1p5()
                             .child(div().flex_1().text_sm().child(format!("{} · {}", p.password, p.description)))
                             .child(label(format!("until {} · {}", p.ends, p.by)))
-                            .child(icon_btn(("tpd", i), "x", MUTED, "Remove").on_click(cx.listener(move |t, _, window, cx| {
+                            .child(icon_btn(("tpd", i), "x", colors().muted, "Remove").on_click(cx.listener(move |t, _, window, cx| {
                                 t.write(AdminWrite::DelTempPassword { password: pw.clone() }, cx);
                                 let handle = window.window_handle();
                                 cx.spawn(async move |this, cx| {
@@ -1206,7 +1206,7 @@ impl AdminView {
                 .justify_between()
                 .py_1()
                 .border_b_1()
-                .border_color(rgba(0xffffff08))
+                .border_color(alpha(ink(), 0x08))
                 .child(label(name))
                 .child(div().text_sm().child(value))
         };
@@ -1351,7 +1351,7 @@ impl AdminView {
                     .min_h(px(40.))
                     .py_1()
                     .border_b_1()
-                    .border_color(rgba(0xffffff08))
+                    .border_color(alpha(ink(), 0x08))
                     .child(
                         v_flex()
                             .flex_1()
@@ -1459,7 +1459,7 @@ impl AdminView {
                     list = list.child(
                         v_flex()
                             .border_b_1()
-                            .border_color(rgba(0xffffff08))
+                            .border_color(alpha(ink(), 0x08))
                             .child(
                                 h_flex()
                                     .id(("msg", i))
@@ -1476,7 +1476,7 @@ impl AdminView {
                                             t.open_message(id, cx);
                                         }
                                     }))
-                                    .child(div().size(px(6.)).rounded_full().when(!m.read, |d| d.bg(rgb(ACCENT))))
+                                    .child(div().size(px(6.)).rounded_full().when(!m.read, |d| d.bg(rgb(colors().accent))))
                                     .child(
                                         v_flex()
                                             .flex_1()
@@ -1490,7 +1490,7 @@ impl AdminView {
                                             )
                                             .child(label(format!("{from} · {}", m.time))),
                                     )
-                                    .child(icon_btn(("mreply", i), "reply", MUTED, "Reply").on_click(cx.listener(
+                                    .child(icon_btn(("mreply", i), "reply", colors().muted, "Reply").on_click(cx.listener(
                                         move |t, _, window, cx| {
                                             cx.stop_propagation();
                                             t.compose_to.update(cx, |i, cx| i.set_value(from_uid.clone(), window, cx));
@@ -1498,7 +1498,7 @@ impl AdminView {
                                             cx.notify();
                                         },
                                     )))
-                                    .child(icon_btn(("mdel", i), "trash", RED, "Delete").on_click(cx.listener(move |t, _, _, cx| {
+                                    .child(icon_btn(("mdel", i), "trash", colors().red, "Delete").on_click(cx.listener(move |t, _, _, cx| {
                                         cx.stop_propagation();
                                         t.write(AdminWrite::DelOffline { id }, cx);
                                         if let Some(Ok(l)) = &mut t.inbox {
@@ -1513,7 +1513,7 @@ impl AdminView {
                                         .pl_5()
                                         .pb_3()
                                         .text_sm()
-                                        .text_color(rgb(0xc4c8ce))
+                                        .text_color(rgb(colors().soft))
                                         .child(super::bbcode::parse(&o.message).element(("msg-body", i))),
                                 )
                             }),
@@ -1566,17 +1566,17 @@ impl AdminView {
                         _ => ("", "", "", l.as_str()),
                     };
                     let color = match level {
-                        "ERROR" | "CRITICAL" => RED,
-                        "WARNING" => AMBER,
-                        _ => MUTED,
+                        "ERROR" | "CRITICAL" => colors().red,
+                        "WARNING" => colors().amber,
+                        _ => colors().muted,
                     };
                     col = col.child(
                         h_flex()
                             .gap_3()
                             .items_start()
-                            .child(div().w(px(120.)).flex_none().text_xs().text_color(rgb(DIM)).child(time.to_string()))
+                            .child(div().w(px(120.)).flex_none().text_xs().text_color(rgb(colors().dim)).child(time.to_string()))
                             .child(div().w(px(100.)).flex_none().text_xs().text_color(rgb(color)).child(what.to_string()))
-                            .child(div().flex_1().text_xs().text_color(rgb(0xc4c8ce)).child(text.to_string())),
+                            .child(div().flex_1().text_xs().text_color(rgb(colors().soft)).child(text.to_string())),
                     );
                 }
             }
@@ -1596,7 +1596,7 @@ impl AdminView {
             .w(px(210.))
             .flex_none()
             .h_full()
-            .bg(rgb(SIDEBAR))
+            .bg(rgb(colors().sidebar))
             .border_r_1()
             .border_color(border())
             .child(header_row().child(div().text_sm().font_weight(FontWeight::SEMIBOLD).truncate().child(server.unwrap_or_else(|| "Server".into()))))
@@ -1630,8 +1630,8 @@ impl AdminView {
                     .when(on, |d| d.bg(active_bg()))
                     .hover(|d| d.bg(hover_bg()))
                     .on_click(cx.listener(move |t, _, window, cx| t.switch(tab.clone(), window, cx)))
-                    .child(icon(ic, 15., if on { TEXT } else { MUTED }))
-                    .child(div().text_sm().truncate().text_color(rgb(if on { TEXT } else { 0xb3b8c0 })).child(title)),
+                    .child(icon(ic, 15., if on { colors().text } else { colors().muted }))
+                    .child(div().text_sm().truncate().text_color(rgb(if on { colors().text } else { colors().soft })).child(title)),
             );
         }
         col
@@ -1665,8 +1665,8 @@ impl Render for AdminView {
         };
         h_flex()
             .size_full()
-            .bg(rgb(BG))
-            .text_color(rgb(TEXT))
+            .bg(rgb(colors().bg))
+            .text_color(rgb(colors().text))
             .font_family(FONT)
             .child(self.sidebar(cx))
             .child(

@@ -9,7 +9,7 @@ use gpui_kit::{
     UnderlineStyle, px, rgb,
 };
 
-use super::widgets::ACCENT;
+use super::widgets::colors;
 
 #[derive(Clone, Default, PartialEq)]
 struct Style {
@@ -239,7 +239,7 @@ impl Rich {
             .iter()
             .filter(|(_, s)| *s != Style::default())
             .map(|(r, s)| {
-                let color = if s.link.is_some() { Some(ACCENT) } else { s.color };
+                let color = if s.link.is_some() { Some(colors().accent) } else { s.color };
                 (
                     r.clone(),
                     HighlightStyle {
