@@ -104,6 +104,11 @@ Linux is what I use every day: PipeWire for audio, Hyprland key bindings for
 hotkeys. On other desktops (KDE Plasma, GNOME) hotkeys go through the global
 shortcuts portal and work while Wisp is running.
 
+Wisp also connects to [Banshee](https://github.com/TimKunze96/banshee), a
+voice server you can run yourself: add a bookmark with the address
+`banshee://host:7700#fingerprint`. Channels, channel chat and voice work there
+so far.
+
 Windows and macOS builds are new and barely tested. Hotkeys are registered with
 the system there, and echo cancellation and lowering other apps are Linux-only
 for now. See [docs/PLAN.md](docs/PLAN.md) for what's left.
