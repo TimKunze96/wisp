@@ -5,6 +5,7 @@
 pub mod admin;
 pub mod chat;
 pub mod files;
+mod banshee;
 mod session;
 
 pub use chat::{ChatKind, ChatLine, Conversation};
@@ -698,7 +699,11 @@ impl Manager {
         let back = self.from_sessions.0.clone();
         let (muted, deaf) = (self.self_muted, self.deafened);
         let away = self.away.clone();
-        tokio::task::spawn_local(session::run(con, bookmark, settings, audio, rx, back, muted, deaf, away));
+        if banshee::is_banshee(&bookmark.address) {
+            tokio::task::spawn_local(banshee::run(con, bookmark, settings, audio, rx, back, muted));
+        } else {
+            tokio::task::spawn_local(session::run(con, bookmark, settings, audio, rx, back, muted, deaf, away));
+        }
     }
 
     fn handle(&mut self, cmd: Cmd) {

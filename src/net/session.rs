@@ -22,7 +22,7 @@ use crate::config::{self, Bookmark, Settings};
 use crate::notify::EventKind;
 
 /// How long after the last voice packet someone still counts as talking.
-const TALK_HOLD: Duration = Duration::from_millis(300);
+pub(super) const TALK_HOLD: Duration = Duration::from_millis(300);
 /// How often ping / packet loss are refreshed.
 const STATS_EVERY: Duration = Duration::from_secs(3);
 
