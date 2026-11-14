@@ -13,7 +13,6 @@ use tsclientlib::messages::s2c::InMessage;
 use tsclientlib::prelude::*;
 use tsclientlib::{
     ChannelId, ClientId, ClientType, Connection, DisconnectOptions, MessageTarget, StreamItem,
-    TextMessageTargetMode,
 };
 use tsproto_packets::packets::{AudioData as AudioPacket, CodecType, OutAudio};
 
@@ -333,7 +332,7 @@ impl Session {
             let mut ft_failed = Vec::new();
             let mut reconnecting = None;
             let mut results = Vec::new();
-            let mut texts: Vec<(TextMessageTargetMode, u16, String, String, String)> = Vec::new();
+            let mut texts: Vec<(MessageTarget, u16, String, String, String)> = Vec::new();
             let mut events: Vec<(EventKind, String, String)> = Vec::new();
             let mut kicked = false;
             let own_id = con.get_state()?.own_client;
@@ -360,25 +359,24 @@ impl Session {
                             let _ = a.ts2a.lock().unwrap().play_packet((con_key, ClientId(from)), packet);
                         }
                     }
-                    StreamItem::BookEvents(_) => {
+                    StreamItem::BookEvents(book_events) => {
                         book_changed = true;
                         reconnecting = Some(false);
-                    }
-                    StreamItem::MessageEvent(InMessage::TextMessage(m)) => {
-                        for part in m.iter() {
-                            let uid = part.invoker_uid.as_ref().map(|u| u.as_ref().to_string()).unwrap_or_default();
-                            texts.push((part.target, part.invoker_id.0, part.invoker_name.clone(), uid, part.message.clone()));
-                        }
-                    }
-                    StreamItem::MessageEvent(InMessage::ClientPoke(m)) => {
-                        for part in m.iter() {
-                            let uid = part.invoker_uid.as_ref().map(|u| u.as_ref().to_string()).unwrap_or_default();
-                            if blocked.contains(&uid) {
-                                continue;
+                        // tsclientlib hands text messages and pokes over as
+                        // book events, not as MessageEvents
+                        for e in book_events {
+                            let tsclientlib::events::Event::Message { target, invoker, message } = e else { continue };
+                            let uid = invoker.uid.as_ref().map(|u| u.as_ref().to_string()).unwrap_or_default();
+                            if let MessageTarget::Poke(_) = target {
+                                if blocked.contains(&uid) {
+                                    continue;
+                                }
+                                let text = strip_bbcode(&message);
+                                messages.push(format!("Poke from {}: {text}", invoker.name));
+                                events.push((EventKind::Poke, format!("{} poked you", invoker.name), text));
+                            } else {
+                                texts.push((target, invoker.id.0, invoker.name, uid, message));
                             }
-                            let text = strip_bbcode(&part.message);
-                            messages.push(format!("Poke from {}: {text}", part.invoker_name));
-                            events.push((EventKind::Poke, format!("{} poked you", part.invoker_name), text));
                         }
                     }
                     StreamItem::MessageEvent(InMessage::ClientMoved(m)) => {
@@ -709,8 +707,8 @@ impl Session {
                         continue;
                     }
                     let kind = match target {
-                        TextMessageTargetMode::Server => ChatKind::Server,
-                        TextMessageTargetMode::Channel => ChatKind::Channel,
+                        MessageTarget::Server => ChatKind::Server,
+                        MessageTarget::Channel => ChatKind::Channel,
                         _ => ChatKind::Private(uid.clone()),
                     };
                     let mention = !my_name.is_empty() && text.to_lowercase().contains(&my_name);
