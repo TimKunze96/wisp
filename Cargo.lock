@@ -673,12 +673,13 @@ dependencies = [
 [[package]]
 name = "banshee-client"
 version = "0.1.0"
-source = "git+https://github.com/TimKunze96/banshee?rev=2294f8d46e1599b334cb384e7db76a5a286d43c8#2294f8d46e1599b334cb384e7db76a5a286d43c8"
+source = "git+https://github.com/TimKunze96/banshee?rev=a1cef79786633a1c23bcdcddb8ce4c1c1c8a4d9b#a1cef79786633a1c23bcdcddb8ce4c1c1c8a4d9b"
 dependencies = [
  "anyhow",
  "banshee-proto",
  "bytes",
  "quinn",
+ "ring",
  "rustls",
  "sha2 0.11.1",
  "tokio",
@@ -687,7 +688,7 @@ dependencies = [
 [[package]]
 name = "banshee-proto"
 version = "0.1.0"
-source = "git+https://github.com/TimKunze96/banshee?rev=2294f8d46e1599b334cb384e7db76a5a286d43c8#2294f8d46e1599b334cb384e7db76a5a286d43c8"
+source = "git+https://github.com/TimKunze96/banshee?rev=a1cef79786633a1c23bcdcddb8ce4c1c1c8a4d9b#a1cef79786633a1c23bcdcddb8ce4c1c1c8a4d9b"
 dependencies = [
  "postcard",
  "serde",
