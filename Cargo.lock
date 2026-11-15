@@ -673,7 +673,7 @@ dependencies = [
 [[package]]
 name = "banshee-client"
 version = "0.1.0"
-source = "git+https://github.com/TimKunze96/banshee?rev=a1cef79786633a1c23bcdcddb8ce4c1c1c8a4d9b#a1cef79786633a1c23bcdcddb8ce4c1c1c8a4d9b"
+source = "git+https://github.com/TimKunze96/banshee?rev=da0c19d780c4545a802380f8a6fa415fb7c32fd6#da0c19d780c4545a802380f8a6fa415fb7c32fd6"
 dependencies = [
  "anyhow",
  "banshee-proto",
@@ -688,7 +688,7 @@ dependencies = [
 [[package]]
 name = "banshee-proto"
 version = "0.1.0"
-source = "git+https://github.com/TimKunze96/banshee?rev=a1cef79786633a1c23bcdcddb8ce4c1c1c8a4d9b#a1cef79786633a1c23bcdcddb8ce4c1c1c8a4d9b"
+source = "git+https://github.com/TimKunze96/banshee?rev=da0c19d780c4545a802380f8a6fa415fb7c32fd6#da0c19d780c4545a802380f8a6fa415fb7c32fd6"
 dependencies = [
  "postcard",
  "serde",

@@ -108,7 +108,8 @@ Wisp also connects to [Banshee](https://github.com/TimKunze96/banshee), a
 voice server you can run yourself: add a bookmark with the address
 `banshee://host:7700#fingerprint`. Voice, whispers, channel/server/private
 chat, pokes, roles (shown as server groups), kicks, bans and channel editing
-work there; files and avatars don't yet.
+work there, and so do channel files, avatars, offline messages and the server
+log.
 
 Windows and macOS builds are new and barely tested. Hotkeys are registered with
 the system there, and echo cancellation and lowering other apps are Linux-only

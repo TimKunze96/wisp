@@ -3,19 +3,24 @@
 //! groups, and what Banshee doesn't have (files, channel groups, permission
 //! numbers) is left out.
 
-use std::collections::{HashMap, VecDeque};
+use std::cell::Cell;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::PathBuf;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use banshee_client::{
-    Account, Channel, ChannelEdit, ChatTarget, Client, ClientMsg, Identity, Key, Leave, NewChannel, Options, Role,
-    ServerEdit, ServerInfo as Info, ServerMsg, User, UserId, Whisper, key_hex,
+    Account, Channel, ChannelEdit, ChatTarget, Client, ClientMsg, Files, Identity, Key, Leave, NewChannel,
+    OfflineMessage, Options, Request, Role, ServerEdit, ServerInfo as Info, ServerMsg, User, UserId, Whisper, key_hex,
 };
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tsclientlib::{ChannelType, ClientId, Codec, MaxClients};
 use tsproto_packets::packets::{AudioData as AudioPacket, CodecType, Direction, InAudioBuf, OutAudio};
 
 use super::chat::{self, ChatKind, ChatLine, Conversation};
+use super::files::{FileCmd, Transfer, TransferState, Transfers};
 use super::session::{TALK_HOLD, placeholder};
 use super::*;
 use crate::ConnectionId;
@@ -66,11 +71,21 @@ enum Pending {
     Tokens(admin::Reply),
     Members(u64, admin::Reply),
     DbId(String, admin::Reply),
+    Files(admin::Reply),
+    /// The whole inbox, or one message.
+    Inbox(Option<u32>, admin::Reply),
+    Log(admin::Reply),
 }
 
 impl Pending {
     fn fail(self, message: String) {
-        let (Pending::Bans(r) | Pending::Tokens(r) | Pending::Members(_, r) | Pending::DbId(_, r)) = self;
+        let (Pending::Bans(r)
+        | Pending::Tokens(r)
+        | Pending::Members(_, r)
+        | Pending::DbId(_, r)
+        | Pending::Files(r)
+        | Pending::Inbox(_, r)
+        | Pending::Log(r)) = self;
         let _ = r.send(Err(message));
     }
 }
@@ -100,6 +115,14 @@ struct Session {
     input_muted: bool,
     /// Why the server dropped us, once it did.
     removed: Option<String>,
+    files: Files,
+    transfers: Transfers,
+    next_transfer: u64,
+    /// Where avatars are cached, and which (key, hash) we already fetch.
+    avatar_dir: PathBuf,
+    avatars_requested: HashSet<(Key, String)>,
+    /// A background task (transfer, avatar) changed something to show.
+    dirty: Rc<Cell<bool>>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -169,6 +192,12 @@ async fn connect_and_run(
         accounts: Vec::new(),
         input_muted,
         removed: None,
+        files: client.files(),
+        transfers: Default::default(),
+        next_transfer: 1,
+        avatar_dir: crate::config::cache_dir().join("avatars").join(session::sanitize(&bookmark.address)),
+        avatars_requested: HashSet::new(),
+        dirty: Default::default(),
     };
     s.base.status = Status::Connected;
     s.base.platform = "Banshee".into();
@@ -200,6 +229,10 @@ async fn connect_and_run(
                 Err(_) => bail!(s.removed.take().unwrap_or_else(|| "Disconnected by the server".into())),
             },
             _ = tick.tick() => {
+                let running = s.transfers.borrow().iter().any(|t| t.state == TransferState::Running);
+                if s.dirty.replace(false) || running {
+                    s.publish();
+                }
                 let before = s.last_voice.len();
                 s.last_voice.retain(|_, (t, _)| t.elapsed() < TALK_HOLD);
                 let own_talking = s.last_own_audio.is_some_and(|t| t.elapsed() < TALK_HOLD);
@@ -323,7 +356,9 @@ impl Session {
             }
             SessionCmd::Settings(settings) => self.settings = settings,
             SessionCmd::ChannelDescription(_) => {}
-            SessionCmd::Files(_) => self.activity("Banshee servers don't have files yet"),
+            SessionCmd::Files(cmd) => self.file_cmd(client, cmd),
+            SessionCmd::SetAvatar(Some((path, _))) => self.set_avatar(path),
+            SessionCmd::SetAvatar(None) => client.send(ClientMsg::ClearAvatar),
             // avatars, recording notices, icons, details: TeamSpeak's
             _ => {}
         }
@@ -475,6 +510,14 @@ impl Session {
                 let Some(key) = self.key_for(d) else { return };
                 ClientMsg::SetRole { key, role: self.info.default_role }
             }
+            W::SendOffline { uid, subject, message } => {
+                let Some(to) = banshee_client::parse_key(&uid) else {
+                    return self.activity("That isn't a Banshee key");
+                };
+                ClientMsg::SendOffline { to, subject, text: message }
+            }
+            W::DelOffline { id } => ClientMsg::DeleteOffline { id },
+            W::MarkOffline { id, read } => ClientMsg::MarkRead { id, read },
             W::EditServer(p) => ClientMsg::EditServer(ServerEdit {
                 name: p.name,
                 welcome: p.welcome_message,
@@ -505,9 +548,177 @@ impl Session {
                 client.send(ClientMsg::ListAccounts);
                 self.pending.push_back(Pending::DbId(uid, reply));
             }
+            Q::Files { channel, path, password } => {
+                let Ok(channel) = u32::try_from(channel) else { return };
+                let password = Some(password).filter(|p| !p.is_empty());
+                client.send(ClientMsg::ListFiles { channel, password, path });
+                self.pending.push_back(Pending::Files(reply));
+            }
+            Q::Inbox => {
+                client.send(ClientMsg::ListInbox);
+                self.pending.push_back(Pending::Inbox(None, reply));
+            }
+            Q::InboxMessage(id) => {
+                // reading one marks it read, like TeamSpeak does
+                client.send(ClientMsg::MarkRead { id, read: true });
+                self.pending.push_back(Pending::Inbox(Some(id), reply));
+            }
+            Q::Log { lines } => {
+                client.send(ClientMsg::ReadLog { lines });
+                self.pending.push_back(Pending::Log(reply));
+            }
             _ => {
                 let _ = reply.send(Err("Banshee servers don't have that".into()));
             }
+        }
+    }
+
+    fn file_cmd(&mut self, client: &Client, cmd: FileCmd) {
+        let pw = |p: String| Some(p).filter(|p| !p.is_empty());
+        let id = |c: u64| u32::try_from(c).unwrap_or(u32::MAX);
+        match cmd {
+            FileCmd::Download { channel, password, path, to } => {
+                let request = Request::Download { channel: id(channel), password: pw(password), path: path.clone() };
+                self.download(request, &path, to);
+            }
+            FileCmd::Upload { channel, password, path, from } => self.upload(id(channel), pw(password), path, from),
+            FileCmd::Delete { channel, password, path } => {
+                client.send(ClientMsg::DeleteFile { channel: id(channel), password: pw(password), path })
+            }
+            FileCmd::Mkdir { channel, password, path } => {
+                client.send(ClientMsg::MakeDir { channel: id(channel), password: pw(password), path })
+            }
+            FileCmd::Rename { channel, password, from, to } => {
+                client.send(ClientMsg::RenameFile { channel: id(channel), password: pw(password), from, to })
+            }
+            FileCmd::ClearDone => {
+                self.transfers.borrow_mut().retain(|t| matches!(t.state, TransferState::Waiting | TransferState::Running))
+            }
+        }
+    }
+
+    fn new_transfer(&mut self, name: &str, upload: bool, local: PathBuf) -> u64 {
+        let id = self.next_transfer;
+        self.next_transfer += 1;
+        let name = name.rsplit('/').next().unwrap_or(name).to_string();
+        self.transfers.borrow_mut().push(Transfer {
+            id,
+            name,
+            upload,
+            size: 0,
+            done: 0,
+            local,
+            state: TransferState::Waiting,
+        });
+        id
+    }
+
+    fn download(&mut self, request: Request, path: &str, to: PathBuf) {
+        let id = self.new_transfer(path, false, to.clone());
+        let (files, list, dirty) = (self.files.clone(), self.transfers.clone(), self.dirty.clone());
+        tokio::task::spawn_local(async move {
+            let result = async {
+                let (size, recv) = files.download(request).await?;
+                files::update(&list, id, |t| {
+                    t.state = TransferState::Running;
+                    t.size = size;
+                });
+                if let Some(dir) = to.parent() {
+                    tokio::fs::create_dir_all(dir).await?;
+                }
+                let mut file = tokio::fs::File::create(&to).await?;
+                let mut recv = recv.take(size);
+                let mut buf = vec![0u8; 64 * 1024];
+                let mut done = 0u64;
+                loop {
+                    let n = recv.read(&mut buf).await?;
+                    if n == 0 {
+                        break;
+                    }
+                    file.write_all(&buf[..n]).await?;
+                    done += n as u64;
+                    files::update(&list, id, |t| t.done = done);
+                }
+                file.flush().await?;
+                if done < size {
+                    bail!("the download stopped early");
+                }
+                anyhow::Ok(())
+            }
+            .await;
+            finish(&list, id, result);
+            dirty.set(true);
+        });
+    }
+
+    fn upload(&mut self, channel: u32, password: Option<String>, path: String, from: PathBuf) {
+        let id = self.new_transfer(&path, true, from.clone());
+        let (files, list, dirty) = (self.files.clone(), self.transfers.clone(), self.dirty.clone());
+        tokio::task::spawn_local(async move {
+            let result = async {
+                let mut file = tokio::fs::File::open(&from).await?;
+                let size = file.metadata().await?.len();
+                files::update(&list, id, |t| t.size = size);
+                let mut up = files.upload(Request::Upload { channel, password, path, size }).await?;
+                files::update(&list, id, |t| t.state = TransferState::Running);
+                let mut buf = vec![0u8; 64 * 1024];
+                let mut done = 0u64;
+                loop {
+                    let n = file.read(&mut buf).await?;
+                    if n == 0 {
+                        break;
+                    }
+                    up.send.write_all(&buf[..n]).await?;
+                    done += n as u64;
+                    files::update(&list, id, |t| t.done = done);
+                }
+                up.finish().await
+            }
+            .await;
+            finish(&list, id, result);
+            dirty.set(true);
+        });
+    }
+
+    fn set_avatar(&mut self, path: PathBuf) {
+        let (files, back, con) = (self.files.clone(), self.back.clone(), self.con_id);
+        tokio::task::spawn_local(async move {
+            let result = async { files.set_avatar(&tokio::fs::read(&path).await?).await }.await;
+            if let Err(e) = result {
+                let _ = back.send(SessionMsg::Activity(con, format!("Couldn't set your picture: {e:#}"), false));
+            }
+        });
+    }
+
+    /// The cached picture of someone, fetching it the first time.
+    fn avatar(&self, u: &User) -> Option<PathBuf> {
+        let hash = u.avatar.as_ref()?;
+        let path = self.avatar_dir.join(format!("{}-{hash}.png", key_hex(&u.key)));
+        if path.exists() {
+            return Some(path);
+        }
+        None
+    }
+
+    /// Start fetching pictures we don't have yet.
+    fn fetch_avatars(&mut self) {
+        let wanted: Vec<(Key, String)> = self
+            .users
+            .values()
+            .filter_map(|u| Some((u.key, u.avatar.clone()?)))
+            .filter(|(k, h)| !self.avatar_dir.join(format!("{}-{h}.png", key_hex(k))).exists())
+            .filter(|w| !self.avatars_requested.contains(w))
+            .collect();
+        for (key, hash) in wanted {
+            self.avatars_requested.insert((key, hash.clone()));
+            let (files, dir, dirty) = (self.files.clone(), self.avatar_dir.clone(), self.dirty.clone());
+            tokio::task::spawn_local(async move {
+                let Ok(data) = files.avatar(key).await else { return };
+                let path = dir.join(format!("{}-{hash}.png", key_hex(&key)));
+                if tokio::fs::create_dir_all(&dir).await.is_ok() && tokio::fs::write(&path, data).await.is_ok() {
+                    dirty.set(true);
+                }
+            });
         }
     }
 
@@ -515,6 +726,9 @@ impl Session {
         let fits = matches!(
             (self.pending.front(), msg),
             (Some(Pending::Bans(_)), ServerMsg::Bans(_))
+                | (Some(Pending::Files(_)), ServerMsg::Files { .. })
+                | (Some(Pending::Inbox(..)), ServerMsg::Inbox(_))
+                | (Some(Pending::Log(_)), ServerMsg::Log(_))
                 | (Some(Pending::Tokens(_)), ServerMsg::Tokens(_))
                 | (Some(Pending::Members(..) | Pending::DbId(..)), ServerMsg::Accounts(_))
         );
@@ -555,6 +769,26 @@ impl Session {
                         return true;
                     }
                 }
+            }
+            (Pending::Files(r), ServerMsg::Files { entries, .. }) => {
+                let rows = entries
+                    .iter()
+                    .map(|e| files::FileEntry {
+                        name: e.name.clone(),
+                        size: e.size,
+                        date: date(e.modified),
+                        is_dir: e.is_dir,
+                    })
+                    .collect();
+                (r, admin::Answer::Files(rows))
+            }
+            (Pending::Inbox(one, r), ServerMsg::Inbox(messages)) => {
+                let rows = messages.iter().filter(|m| one.is_none_or(|id| id == m.id)).map(offline_row).collect();
+                (r, admin::Answer::Inbox(rows))
+            }
+            (Pending::Log(r), ServerMsg::Log(lines)) => {
+                let rows = lines.iter().map(|l| format!("{} | {}", date(l.time), l.text)).collect();
+                (r, admin::Answer::Log(rows))
             }
             _ => unreachable!("checked above"),
         };
@@ -601,7 +835,14 @@ impl Session {
                 Some(p) => p.fail(message),
                 None => self.activity(&capitalized(&message)),
             },
-            ServerMsg::Bans(_) | ServerMsg::Tokens(_) | ServerMsg::Accounts(_) | ServerMsg::Welcome { .. } => {}
+            // answers nobody waits for (after a change)
+            ServerMsg::Bans(_)
+            | ServerMsg::Tokens(_)
+            | ServerMsg::Accounts(_)
+            | ServerMsg::Files { .. }
+            | ServerMsg::Inbox(_)
+            | ServerMsg::Log(_)
+            | ServerMsg::Welcome { .. } => {}
         }
     }
 
@@ -721,7 +962,8 @@ impl Session {
     }
 
     /// Send the current state to the manager.
-    fn publish(&self) {
+    fn publish(&mut self) {
+        self.fetch_avatars();
         let mut snap = self.base.clone();
         snap.server_name = self.info.name.clone();
         snap.welcome = self.info.welcome.clone();
@@ -763,6 +1005,7 @@ impl Session {
                 c
             })
             .collect();
+        snap.transfers = self.transfers.borrow().clone();
         let _ = self.back.send(SessionMsg::Snap(snap));
     }
 
@@ -801,7 +1044,7 @@ impl Session {
             talk_power_granted: u.talk_granted,
             db_id: db_id(&u.key),
             talk_request: u.talk_request.clone(),
-            avatar: None,
+            avatar: self.avatar(u),
             friend: false,
             blocked: false,
             whispering,
@@ -832,6 +1075,26 @@ fn limit(m: MaxClients) -> Option<u32> {
     match m {
         MaxClients::Limited(n) => Some(u32::from(n)),
         _ => None,
+    }
+}
+
+fn finish(list: &Transfers, id: u64, result: Result<()>) {
+    files::update(list, id, |t| {
+        t.state = match result {
+            Ok(()) => TransferState::Done,
+            Err(e) => TransferState::Failed(format!("{e:#}")),
+        }
+    });
+}
+
+fn offline_row(m: &OfflineMessage) -> admin::OfflineMessage {
+    admin::OfflineMessage {
+        id: m.id,
+        from_uid: key_hex(&m.from),
+        subject: m.subject.clone(),
+        message: m.text.clone(),
+        time: date(m.sent),
+        read: m.read,
     }
 }
 

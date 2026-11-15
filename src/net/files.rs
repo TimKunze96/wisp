@@ -60,7 +60,7 @@ pub enum Purpose {
 
 pub type Transfers = Rc<RefCell<Vec<Transfer>>>;
 
-fn update(list: &Transfers, id: u64, f: impl FnOnce(&mut Transfer)) {
+pub(crate) fn update(list: &Transfers, id: u64, f: impl FnOnce(&mut Transfer)) {
     if let Some(t) = list.borrow_mut().iter_mut().find(|t| t.id == id) {
         f(t);
     }
