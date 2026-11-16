@@ -9,7 +9,7 @@ use gpui_kit::{
 
 use super::Model;
 use super::colors::colors;
-use super::streams::{Feed, quality_picker, status_line, tool_button};
+use super::streams::{Feed, quality_picker, sound_controls, status_line, tool_button};
 use super::widgets::*;
 
 pub struct ScreenView {
@@ -67,6 +67,7 @@ impl Render for ScreenView {
                         .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(f.name.clone()))
                         .child(div().text_xs().text_color(rgb(colors().muted)).child(status_line(f)))
                         .child(div().flex_1())
+                        .children(sound_controls(&self.feed, cx))
                         .child(quality_picker(&self.feed, cx))
                         .child(tool_button("fullscreen", "maximize", "Fullscreen (or double-click)").on_click(
                             |_, window, _| window.toggle_fullscreen(),

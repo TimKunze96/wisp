@@ -567,7 +567,7 @@ impl Session {
                         self.inspect_vars_sent = None;
                         self.last_stats = None;
                     }
-                    Some(SessionCmd::Share(_) | SessionCmd::Watch(..) | SessionCmd::WatchQuality(..)) => {}
+                    Some(SessionCmd::Share(_) | SessionCmd::Watch(..) | SessionCmd::WatchQuality(..) | SessionCmd::StreamVolume(..)) => {}
                     Some(SessionCmd::ChannelDescription(id)) => {
                         if let Some(c) = con.get_state()?.channels.get(&ChannelId(id)) {
                             let _ = c.description().to_packet().send(&mut con);

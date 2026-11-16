@@ -19,6 +19,8 @@ use gpui_kit::{
     ParentElement, RenderImage, SharedString, StatefulInteractiveElement, Styled, StyledImage, div, img, px, rgb,
 };
 
+use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
+
 use super::Model;
 use super::colors::colors;
 use super::widgets::*;
@@ -46,6 +48,10 @@ pub struct Feed {
     sent: Quality,
     /// We could watch it last time we looked (sharing, same channel).
     reachable: bool,
+    /// Its sound: volume (1.0 = as sent) and muted.
+    volume: f32,
+    pub muted: bool,
+    pub slider: Entity<SliderState>,
 }
 
 impl Feed {
@@ -55,6 +61,14 @@ impl Feed {
         })
         .detach();
         let (screen, _) = Screen::new();
+        let slider = cx.new(|_| SliderState::new().min(0.).max(150.).step(5.).default_value(100.));
+        cx.subscribe(&slider, |f: &mut Self, _, ev: &SliderEvent, cx| {
+            let (SliderEvent::Change(v) | SliderEvent::Release(v)) = ev;
+            f.volume = v.start() / 100.;
+            f.muted = false;
+            f.send_volume(cx);
+        })
+        .detach();
         let mut f = Self {
             net,
             con,
@@ -68,6 +82,9 @@ impl Feed {
             choice: Quality::Auto,
             sent: SMALLEST,
             reachable: true,
+            volume: 1.0,
+            muted: false,
+            slider,
         };
         f.watch(cx);
         f
@@ -126,6 +143,17 @@ impl Feed {
             self.info = info;
         }
         self.name = name.to_string();
+        cx.notify();
+    }
+
+    pub fn toggle_mute(&mut self, cx: &mut Context<Self>) {
+        self.muted = !self.muted;
+        self.send_volume(cx);
+    }
+
+    fn send_volume(&mut self, cx: &mut Context<Self>) {
+        let volume = if self.muted { 0.0 } else { self.volume };
+        self.net.send(Cmd::StreamVolume { con: self.con, client: self.client, volume });
         cx.notify();
     }
 
@@ -287,6 +315,26 @@ pub fn quality_picker(feed: &Entity<Feed>, cx: &App) -> impl IntoElement {
     }))
 }
 
+/// Mute button and volume slider, for streams with sound.
+pub fn sound_controls(feed: &Entity<Feed>, cx: &App) -> Option<impl IntoElement> {
+    let f = feed.read(cx);
+    if !f.info.as_ref().is_some_and(|i| i.audio) {
+        return None;
+    }
+    let muted = f.muted;
+    let feed2 = feed.clone();
+    Some(
+        h_flex()
+            .gap_2()
+            .items_center()
+            .child(
+                tool_button("mute", if muted { "volume-x" } else { "volume-2" }, if muted { "Unmute" } else { "Mute" })
+                    .on_click(move |_, _, cx| feed2.update(cx, |f, cx| f.toggle_mute(cx))),
+            )
+            .child(div().w(px(110.)).child(Slider::new(&f.slider))),
+    )
+}
+
 /// "1080p · 3 watching"
 pub fn status_line(f: &Feed) -> String {
     let viewers = match f.viewers() {
@@ -317,6 +365,7 @@ pub fn stage(model: &Entity<Model>, feed: &Entity<Feed>, cx: &App) -> impl IntoE
                 .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(f.name.clone()))
                 .child(div().text_xs().text_color(rgb(colors().muted)).child(status_line(f)))
                 .child(div().flex_1())
+                .children(sound_controls(feed, cx))
                 .child(quality_picker(feed, cx))
                 .child(
                     tool_button("pop-out", "external-link", "Open in its own window").on_click(move |_, _, cx| {

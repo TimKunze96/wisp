@@ -183,6 +183,8 @@ pub enum Cmd {
     Watch { con: ConId, client: u16, screen: Option<crate::video::Screen>, quality: crate::video::Quality },
     /// Change the quality of a screen we watch.
     WatchQuality { con: ConId, client: u16, quality: crate::video::Quality },
+    /// How loud a screen we watch plays (0 mutes).
+    StreamVolume { con: ConId, client: u16, volume: f32 },
     /// Disconnect everything, then answer.
     Shutdown(oneshot::Sender<()>),
 }
@@ -431,6 +433,7 @@ pub(crate) enum SessionCmd {
     Share(bool),
     Watch(u16, Option<crate::video::Screen>, crate::video::Quality),
     WatchQuality(u16, crate::video::Quality),
+    StreamVolume(u16, f32),
 }
 
 #[derive(Clone)]
@@ -841,6 +844,7 @@ impl Manager {
             Cmd::Share { con, on } => to(self, con, SessionCmd::Share(on)),
             Cmd::Watch { con, client, screen, quality } => to(self, con, SessionCmd::Watch(client, screen, quality)),
             Cmd::WatchQuality { con, client, quality } => to(self, con, SessionCmd::WatchQuality(client, quality)),
+            Cmd::StreamVolume { con, client, volume } => to(self, con, SessionCmd::StreamVolume(client, volume)),
             Cmd::FetchIcons { con, ids } => to(self, con, SessionCmd::FetchIcons(ids)),
             Cmd::SetAvatar(a) => {
                 for s in self.sessions.values() {

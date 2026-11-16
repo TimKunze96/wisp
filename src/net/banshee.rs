@@ -396,6 +396,11 @@ impl Session {
                     old.end();
                 }
             }
+            SessionCmd::StreamVolume(id, volume) => {
+                if let Some(audio) = &self.audio {
+                    audio.ts2a.lock().unwrap().set_volume(stream_sound_id(self.con_id, id.into()), volume);
+                }
+            }
             SessionCmd::WatchQuality(id, quality) => {
                 client.send(ClientMsg::SetQuality { user: UserId::from(id), quality });
             }
@@ -1020,7 +1025,8 @@ impl Session {
         if self.sharing.is_some() && self.me().is_some_and(|me| me.stream.is_some()) {
             return;
         }
-        let (tx, mut rx) = mpsc::channel(4);
+        // video frames and 20 ms sound packets
+        let (tx, mut rx) = mpsc::channel(32);
         self.sharing = Some(Sharing::start(tx));
         let (video, back, con) = (self.video.clone(), self.back.clone(), self.con_id);
         tokio::task::spawn_local(async move {
@@ -1056,11 +1062,31 @@ impl Session {
     /// A screen we asked for arrived: decode it onto its viewer.
     fn watch_stream(&mut self, mut w: Watching) {
         let Some(screen) = self.watching.get(&w.from).cloned() else { return };
+        let audio = self.audio.clone();
+        let id = stream_sound_id(self.con_id, w.from);
         tokio::task::spawn_local(async move {
             let (tx, rx) = std::sync::mpsc::channel();
             crate::video::decode(rx, screen.clone());
+            let mut seq = 0u16;
             while let Ok(Some(packet)) = w.packet().await {
-                if screen.ended() || tx.send(packet).is_err() {
+                if screen.ended() {
+                    break;
+                }
+                if packet.is_audio() {
+                    // the voice mixer plays it, as stereo "music"
+                    let Some(audio) = &audio else { continue };
+                    let out = OutAudio::new(&AudioPacket::S2C {
+                        id: seq,
+                        codec: CodecType::OpusMusic,
+                        from: id.1.0,
+                        data: &packet.data,
+                    });
+                    seq = seq.wrapping_add(1);
+                    if seq % 50 == 1 { eprintln!("DBG sound packets {seq} len {}", packet.data.len()); }
+                    if let Ok(input) = InAudioBuf::try_new(Direction::S2C, out.into_vec()) {
+                        let _ = audio.ts2a.lock().unwrap().play_packet(id, input);
+                    }
+                } else if tx.send(packet).is_err() {
                     break;
                 }
             }
@@ -1161,6 +1187,12 @@ impl Session {
             uid: key_hex(&u.key),
         }
     }
+}
+
+/// Where a shared screen's sound goes in the voice mixer: next to the
+/// sharer's voice, with the top bit set.
+fn stream_sound_id(con: ConId, from: UserId) -> crate::audio::ts_to_audio::Id {
+    (ConnectionId(con), ClientId(0x8000 | (from as u16 & 0x7fff)))
 }
 
 /// Server messages start lowercase; our activity lines don't.

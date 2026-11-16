@@ -3,6 +3,21 @@
 
 mod convert;
 #[cfg(target_os = "linux")]
+#[path = "sound_linux.rs"]
+mod sound;
+#[cfg(windows)]
+#[path = "sound_windows.rs"]
+mod sound;
+#[cfg(target_os = "macos")]
+mod sound {
+    pub struct Sound;
+    impl Sound {
+        pub fn start(_packets: impl FnMut(Vec<u8>) + Send + 'static) -> anyhow::Result<Self> {
+            anyhow::bail!("sharing sound isn't supported here yet")
+        }
+    }
+}
+#[cfg(target_os = "linux")]
 #[path = "capture_linux.rs"]
 mod capture;
 #[cfg(not(target_os = "linux"))]
@@ -20,7 +35,7 @@ use openh264::decoder::Decoder;
 use openh264::encoder::{BitRate, Encoder, EncoderConfig, FrameRate, FrameType, IntraFramePeriod, UsageType};
 use openh264::formats::YUVBuffer;
 
-pub use banshee_client::{Layer, Packet, Quality, StreamInfo};
+pub use banshee_client::{AUDIO, Layer, Packet, Quality, StreamInfo};
 use banshee_client::MAX_LAYERS;
 
 /// We send at most this many frames a second.
@@ -79,6 +94,27 @@ impl Latest {
     }
 }
 
+/// Samples per channel in a 20 ms sound packet.
+pub const SOUND_FRAME: usize = 960;
+
+/// Stereo Opus for the sound of a shared screen.
+pub struct SoundEncoder(audiopus::coder::Encoder, Vec<u8>);
+
+impl SoundEncoder {
+    pub fn new() -> Result<Self> {
+        use audiopus::{Application, Bitrate, Channels, SampleRate};
+        let mut e = audiopus::coder::Encoder::new(SampleRate::Hz48000, Channels::Stereo, Application::Audio)?;
+        e.set_bitrate(Bitrate::BitsPerSecond(128_000))?;
+        Ok(Self(e, vec![0; 4000]))
+    }
+
+    /// One 20 ms frame, interleaved stereo.
+    pub fn encode(&mut self, frame: &[f32]) -> Option<Vec<u8>> {
+        let n = self.0.encode_float(frame, &mut self.1).ok()?;
+        Some(self.1[..n].to_vec())
+    }
+}
+
 /// From the share thread to the session.
 pub enum ShareMsg {
     /// The first frame arrived: the layers we'll send.
@@ -127,6 +163,21 @@ impl Drop for Sharing {
     }
 }
 
+/// The sound of the computer, if we can get it.
+fn sound(out: &tokio::sync::mpsc::Sender<ShareMsg>) -> Option<sound::Sound> {
+    let out = out.clone();
+    let packets = move |data| {
+        let _ = out.try_send(ShareMsg::Packet(Packet { track: AUDIO, keyframe: false, data }));
+    };
+    match sound::Sound::start(packets) {
+        Ok(s) => Some(s),
+        Err(e) => {
+            tracing::warn!("screen share without sound: {e:#}");
+            None
+        }
+    }
+}
+
 fn share(stop: &AtomicBool, keyframes: &Keyframes, out: &tokio::sync::mpsc::Sender<ShareMsg>) -> Result<()> {
     // WISP_TEST_SCREEN=WxH shares a moving test picture instead of the screen
     if let Some((w, h)) = std::env::var("WISP_TEST_SCREEN").ok().and_then(|v| {
@@ -137,12 +188,15 @@ fn share(stop: &AtomicBool, keyframes: &Keyframes, out: &tokio::sync::mpsc::Send
         let (l, stopped) = (latest.clone(), Arc::new(AtomicBool::new(false)));
         let s = stopped.clone();
         std::thread::spawn(move || test_pattern(w, h, &l, &s));
-        let result = encode_loop(&latest, stop, keyframes, out);
+        let sound = sound(out);
+        let result = encode_loop(&latest, stop, keyframes, out, sound.is_some());
         stopped.store(true, Ordering::Relaxed);
         return result;
     }
     let capture = capture::Capture::open()?;
-    let result = encode_loop(&capture.latest, stop, keyframes, out);
+    let sound = sound(out);
+    let result = encode_loop(&capture.latest, stop, keyframes, out, sound.is_some());
+    drop(sound);
     capture.close();
     result
 }
@@ -179,6 +233,7 @@ fn encode_loop(
     stop: &AtomicBool,
     keyframes: &Keyframes,
     out: &tokio::sync::mpsc::Sender<ShareMsg>,
+    audio: bool,
 ) -> Result<()> {
     let mut layers: Vec<LayerEncoder> = Vec::new();
     let mut last: Option<Raw> = None;
@@ -220,7 +275,7 @@ fn encode_loop(
                         bitrate: bitrate(l.width, l.height),
                     })
                     .collect(),
-                audio: false,
+                audio,
                 viewers: 0,
             };
             if out.blocking_send(ShareMsg::Started(info)).is_err() {
