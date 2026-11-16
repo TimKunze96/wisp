@@ -263,10 +263,9 @@ impl Session {
         if !b.channel.trim().is_empty() {
             self.default_channel = Some((b.channel.clone(), Instant::now() + Duration::from_secs(5)));
         }
-        {
-            let state = con.get_state()?;
-            tracing::info!("connected to {}: {} channels, {} clients", b.address, state.channels.len(), state.clients.len());
-        }
+        tracing::info!("connected to {}", b.address);
+        // the channel and client lists arrive after this
+        let mut count_at = Some(Instant::now() + Duration::from_secs(3));
         self.base.status = Status::Connected;
         {
             let server = &con.get_state()?.server;
@@ -459,12 +458,15 @@ impl Session {
                         let saved = self.settings.channel_passwords.get(&config::channel_key(&self.base.bookmark, id));
                         let password = password.or_else(|| saved.cloned());
                         let state = con.get_state()?;
-                        let mut part = state.clients[&state.own_client].client_move(ChannelId(id));
-                        if let Some(pw) = &password {
-                            part = part.set_password(pw);
+                        // our own entry can arrive after the channel list
+                        if let Some(me) = state.clients.get(&state.own_client) {
+                            let mut part = me.client_move(ChannelId(id));
+                            if let Some(pw) = &password {
+                                part = part.set_password(pw);
+                            }
+                            let handle = part.to_packet().send_with_result(&mut con)?;
+                            self.joins.insert(handle, (id, password.is_some()));
                         }
-                        let handle = part.to_packet().send_with_result(&mut con)?;
-                        self.joins.insert(handle, (id, password.is_some()));
                     }
                     // the answer to this one lands in our bookkeeping, not in a notify
                     Some(SessionCmd::Query(admin::Query::ServerConnection, reply)) => {
@@ -541,10 +543,15 @@ impl Session {
                     Some(SessionCmd::Me(action)) => {
                         let state = con.get_state()?;
                         let cmd = match &action {
-                            SelfAction::Commander(on) => state.client_update().set_is_channel_commander(*on).to_packet(),
-                            SelfAction::TalkRequest(msg) => state.client_update().set_talk_power_request(msg.as_deref()).to_packet(),
-                            SelfAction::Description(d) => state.clients[&state.own_client].edit().set_description(d).to_packet(),
+                            SelfAction::Commander(on) => Some(state.client_update().set_is_channel_commander(*on).to_packet()),
+                            SelfAction::TalkRequest(msg) => {
+                                Some(state.client_update().set_talk_power_request(msg.as_deref()).to_packet())
+                            }
+                            SelfAction::Description(d) => {
+                                state.clients.get(&state.own_client).map(|me| me.edit().set_description(d).to_packet())
+                            }
                         };
+                        let Some(cmd) = cmd else { continue };
                         let what = match action {
                             SelfAction::Commander(true) => "Became channel commander",
                             SelfAction::Commander(false) => "Stopped being channel commander",
@@ -765,6 +772,12 @@ impl Session {
                     }
                 }
             }
+            if count_at.is_some_and(|t| Instant::now() >= t) {
+                let state = con.get_state()?;
+                let me = if state.clients.contains_key(&state.own_client) { "" } else { ", not ourselves" };
+                tracing::info!("have {} channels, {} clients{me}", state.channels.len(), state.clients.len());
+                count_at = None;
+            }
             if book_changed {
                 self.finish_creates(&mut con);
                 self.report_changes(con.get_state()?);
@@ -822,7 +835,10 @@ impl Session {
             }
             return Ok(last_try);
         };
-        let me = &state.clients[&state.own_client];
+        // our own entry can arrive after the channel list: try again next tick
+        let Some(me) = state.clients.get(&state.own_client) else {
+            return Ok(last_try);
+        };
         if me.channel == target {
             return Ok(true);
         }
