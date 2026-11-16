@@ -118,6 +118,8 @@ pub struct SettingsView {
     /// Binds Hyprland already has (normalized spec, description).
     taken: Vec<(String, String)>,
     hotkey_error: Option<String>,
+    /// The GPU encoder screen sharing would use, once looked for.
+    gpu: Option<Option<&'static str>>,
 }
 
 const LABEL_W: f32 = 180.;
@@ -168,7 +170,17 @@ impl SettingsView {
             confirm_delete_identity: None,
             taken: Vec::new(),
             hotkey_error: None,
+            gpu: None,
         };
+        // trying the encoders takes a moment
+        cx.spawn(async move |this, cx| {
+            let found = cx.background_executor().spawn(async { crate::video::gpu::detect().map(|g| g.label()) }).await;
+            let _ = this.update(cx, |t, cx| {
+                t.gpu = Some(found);
+                cx.notify();
+            });
+        })
+        .detach();
         this.switch(tab, window, cx);
         this
     }
@@ -1489,6 +1501,7 @@ impl SettingsView {
                     ))
                 }),
             )
+            .child(self.screen_sharing(cx))
             .child(
                 section("Command line").child(
                     v_flex().gap_1().children(
@@ -1514,6 +1527,41 @@ impl SettingsView {
                 ),
             )
             .into_any_element()
+    }
+
+    fn screen_sharing(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let s = &self.model.read(cx).settings;
+        let (height, fps, use_gpu) = (s.screen_height, s.screen_fps, s.screen_gpu);
+        let set = |f: fn(&mut crate::config::Settings, u32), v: u32| {
+            cx.listener(move |t, _, _, cx| t.model.update(cx, |m, cx| m.update_settings(cx, |s| f(s, v))))
+        };
+        let mut sizes = h_flex().gap_2();
+        for (h, text) in [(720, "720p"), (1080, "1080p"), (1440, "1440p"), (2160, "4K")] {
+            sizes = sizes.child(chip(("share-h", h as usize), text, height == h).on_click(set(|s, v| s.screen_height = v, h)));
+        }
+        let mut rates = h_flex().gap_2();
+        for r in [30, 60] {
+            rates = rates.child(chip(("share-fps", r as usize), format!("{r} fps"), fps == r).on_click(set(|s, v| s.screen_fps = v, r)));
+        }
+        let gpu_note = match self.gpu {
+            None => "Looking for a GPU encoder...".to_string(),
+            Some(Some(name)) => format!("Uses {name} through ffmpeg"),
+            Some(None) => "No GPU encoder found (it needs ffmpeg). Above 1080p30 the CPU has a lot to do.".to_string(),
+        };
+        section("Screen sharing")
+            .child(setting_row("Resolution", v_flex().gap_1().child(sizes).child(label("The most you send; bigger screens are scaled down. Viewers also get 720p and 360p versions, picked for their connection."))))
+            .child(setting_row("Frame rate", rates))
+            .child(setting_row(
+                "Graphics card",
+                h_flex()
+                    .gap_3()
+                    .items_center()
+                    .child(Switch::new("share-gpu").checked(use_gpu).on_click(cx.listener(|t, v: &bool, _, cx| {
+                        let v = *v;
+                        t.model.update(cx, |m, cx| m.update_settings(cx, |s| s.screen_gpu = v));
+                    })))
+                    .child(label(gpu_note)),
+            ))
     }
 
     fn tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {

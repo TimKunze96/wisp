@@ -2,6 +2,7 @@
 //! and decode the screens we watch into pictures for the viewer window.
 
 mod convert;
+pub mod gpu;
 #[cfg(target_os = "linux")]
 #[path = "sound_linux.rs"]
 mod sound;
@@ -38,12 +39,30 @@ use openh264::formats::YUVBuffer;
 pub use banshee_client::{AUDIO, Layer, Packet, Quality, StreamInfo};
 use banshee_client::MAX_LAYERS;
 
-/// We send at most this many frames a second.
+/// Frame rate of the smaller layers (and of everything on the CPU at 30).
 const FPS: u32 = 30;
-/// Bigger screens are scaled down to fit.
-const MAX_SIZE: (usize, usize) = (1920, 1080);
-/// A keyframe at least this often, so a picture that broke heals by itself.
+/// A keyframe at least this often on the CPU layers, so a picture that
+/// broke heals by itself.
 const KEYFRAME_FRAMES: u32 = FPS * 10;
+/// The GPU layer can't be asked for keyframes, so it sends one this often.
+const GPU_KEYFRAME_SECS: u32 = 2;
+
+/// What the sharer picked.
+#[derive(Clone, Copy, Debug)]
+pub struct ShareOptions {
+    /// Biggest picture height (the width follows the screen).
+    pub max_height: u32,
+    pub fps: u32,
+    /// Encode the best layer on the graphics card when there's a way.
+    pub gpu: bool,
+}
+
+impl ShareOptions {
+    fn max_size(&self) -> (usize, usize) {
+        let h = self.max_height as usize;
+        (h * 16 / 9, h)
+    }
+}
 
 /// Pixel order of a captured frame (the fourth byte is ignored).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -134,14 +153,14 @@ pub struct Sharing {
 
 impl Sharing {
     /// Ask the user what to share, then send packets to `out` until stopped.
-    pub fn start(out: tokio::sync::mpsc::Sender<ShareMsg>) -> Self {
+    pub fn start(options: ShareOptions, out: tokio::sync::mpsc::Sender<ShareMsg>) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let keyframes: Arc<Keyframes> = Arc::new(Default::default());
         let (s, k) = (stop.clone(), keyframes.clone());
         std::thread::Builder::new()
             .name("screen-share".into())
             .spawn(move || {
-                if let Err(e) = share(&s, &k, &out) {
+                if let Err(e) = share(options, &s, &k, &out) {
                     let _ = out.blocking_send(ShareMsg::Failed(format!("{e:#}")));
                 }
             })
@@ -178,7 +197,12 @@ fn sound(out: &tokio::sync::mpsc::Sender<ShareMsg>) -> Option<sound::Sound> {
     }
 }
 
-fn share(stop: &AtomicBool, keyframes: &Keyframes, out: &tokio::sync::mpsc::Sender<ShareMsg>) -> Result<()> {
+fn share(
+    options: ShareOptions,
+    stop: &AtomicBool,
+    keyframes: &Keyframes,
+    out: &tokio::sync::mpsc::Sender<ShareMsg>,
+) -> Result<()> {
     // WISP_TEST_SCREEN=WxH shares a moving test picture instead of the screen
     if let Some((w, h)) = std::env::var("WISP_TEST_SCREEN").ok().and_then(|v| {
         let (w, h) = v.split_once('x')?;
@@ -187,58 +211,88 @@ fn share(stop: &AtomicBool, keyframes: &Keyframes, out: &tokio::sync::mpsc::Send
         let latest = Arc::new(Latest::default());
         let (l, stopped) = (latest.clone(), Arc::new(AtomicBool::new(false)));
         let s = stopped.clone();
-        std::thread::spawn(move || test_pattern(w, h, &l, &s));
+        let fps = options.fps;
+        std::thread::spawn(move || test_pattern(w, h, fps, &l, &s));
         let sound = sound(out);
-        let result = encode_loop(&latest, stop, keyframes, out, sound.is_some());
+        let result = encode_loop(options, &latest, stop, keyframes, out, sound.is_some());
         stopped.store(true, Ordering::Relaxed);
         return result;
     }
-    let capture = capture::Capture::open()?;
+    let capture = capture::Capture::open(options.fps)?;
     let sound = sound(out);
-    let result = encode_loop(&capture.latest, stop, keyframes, out, sound.is_some());
+    let result = encode_loop(options, &capture.latest, stop, keyframes, out, sound.is_some());
     drop(sound);
     capture.close();
     result
 }
 
-/// Bars that move, a frame every 1/FPS.
-fn test_pattern(width: usize, height: usize, latest: &Latest, stop: &AtomicBool) {
+/// Bars that move, `fps` frames a second.
+fn test_pattern(width: usize, height: usize, fps: u32, latest: &Latest, stop: &AtomicBool) {
     let mut t = 0usize;
-    while !stop.load(Ordering::Relaxed) {
+    // two pictures drawn once, then shifted: drawing each frame costs too much at 4K
+    let draw = |shift: usize| {
         let mut data = vec![0u8; width * height * 4];
         for (i, px) in data.chunks_exact_mut(4).enumerate() {
             let (x, y) = (i % width, i / width);
-            let band = ((x + t * 8) / 64) % 4;
+            let band = ((x + shift) / 64) % 4;
             let c = [[255, 80, 80], [80, 255, 80], [80, 80, 255], [240, 240, 240]][band];
             let shade = (y * 255 / height) as u8;
             px.copy_from_slice(&[c[2].min(shade.saturating_add(60)), c[1], c[0], 255]);
         }
+        data
+    };
+    let base = draw(0);
+    while !stop.load(Ordering::Relaxed) {
+        // moving bars: the pattern repeats every 256 pixels
+        let shift = (t * 8) % 256;
+        let mut data = vec![0u8; width * height * 4];
+        for y in 0..height {
+            let row = &base[y * width * 4..(y + 1) * width * 4];
+            let dst = &mut data[y * width * 4..(y + 1) * width * 4];
+            let cut = (width - (shift % width)) * 4;
+            dst[..cut].copy_from_slice(&row[(shift % width) * 4..]);
+            dst[cut..].copy_from_slice(&row[..(shift % width) * 4]);
+        }
         latest.put(Raw { width, height, stride: width * 4, order: Order::Bgra, data });
         t += 1;
-        std::thread::sleep(Duration::from_secs(1) / FPS);
+        std::thread::sleep(Duration::from_secs(1) / fps);
     }
     latest.end();
 }
 
-/// One layer of the stream: its size and encoder.
-struct LayerEncoder {
+/// A layer encoded on the CPU: its size and encoder.
+struct CpuLayer {
     width: usize,
     height: usize,
     encoder: Encoder,
     since_key: u32,
 }
 
+/// The best layer on the graphics card.
+struct GpuLayer {
+    gpu: gpu::Gpu,
+    width: usize,
+    height: usize,
+    encoder: Option<gpu::GpuEncoder>,
+}
+
 fn encode_loop(
+    options: ShareOptions,
     latest: &Latest,
     stop: &AtomicBool,
     keyframes: &Keyframes,
     out: &tokio::sync::mpsc::Sender<ShareMsg>,
     audio: bool,
 ) -> Result<()> {
-    let mut layers: Vec<LayerEncoder> = Vec::new();
+    let fps = options.fps.clamp(1, 120);
+    let gpu = if options.gpu { gpu::detect() } else { None };
+    let mut top: Option<GpuLayer> = None;
+    let mut layers: Vec<CpuLayer> = Vec::new();
+    let mut started = false;
     let mut last: Option<Raw> = None;
-    let frame_time = Duration::from_secs(1) / FPS;
+    let frame_time = Duration::from_secs(1) / fps;
     let mut next = Instant::now();
+    let mut frame_no: u64 = 0;
     while !stop.load(Ordering::Relaxed) && !out.is_closed() {
         let fresh = match latest.take(Duration::from_millis(200)) {
             Ok(f) => f,
@@ -246,6 +300,7 @@ fn encode_loop(
         };
         let want: Vec<bool> = keyframes.iter().map(|k| k.swap(false, Ordering::Relaxed)).collect();
         // a still screen sends nothing, unless someone needs a keyframe
+        let is_fresh = fresh.is_some();
         let frame = match fresh {
             Some(f) => last.insert(f),
             None if !want.contains(&true) => continue,
@@ -260,50 +315,84 @@ fn encode_loop(
             },
         };
         // the layers are fixed by the first frame; later sizes are letterboxed
-        if layers.is_empty() {
-            for (width, height) in ladder(frame.width, frame.height) {
-                let encoder = new_encoder(width, height)?;
-                layers.push(LayerEncoder { width, height, encoder, since_key: 0 });
+        if !started {
+            started = true;
+            let sizes = ladder(frame.width, frame.height, options.max_size());
+            let mut info = Vec::new();
+            let mut cpu_sizes = &sizes[..];
+            if let Some(g) = &gpu {
+                let (width, height) = sizes[0];
+                top = Some(GpuLayer { gpu: g.clone(), width, height, encoder: None });
+                info.push(Layer { width: width as u16, height: height as u16, fps: fps as u8, bitrate: gpu_bitrate(width, height, fps) });
+                cpu_sizes = &sizes[1..];
             }
-            let info = StreamInfo {
-                layers: layers
-                    .iter()
-                    .map(|l| Layer {
-                        width: l.width as u16,
-                        height: l.height as u16,
-                        fps: FPS as u8,
-                        bitrate: bitrate(l.width, l.height),
-                    })
-                    .collect(),
-                audio,
-                viewers: 0,
-            };
+            let cpu_fps = if gpu.is_some() { fps.min(FPS) } else { fps };
+            for &(width, height) in cpu_sizes {
+                let encoder = new_encoder(width, height, cpu_fps)?;
+                layers.push(CpuLayer { width, height, encoder, since_key: 0 });
+                info.push(Layer {
+                    width: width as u16,
+                    height: height as u16,
+                    fps: cpu_fps as u8,
+                    bitrate: bitrate(width, height, cpu_fps),
+                });
+            }
+            let info = StreamInfo { layers: info, audio, viewers: 0 };
             if out.blocking_send(ShareMsg::Started(info)).is_err() {
                 break;
             }
         }
-        let mut picture: Option<convert::Rgb> = None;
-        for (i, l) in layers.iter_mut().enumerate() {
-            // each layer from the one above (cheaper than from the screen)
-            let rgb = match picture.take() {
-                None => convert::Rgb::from_raw(frame, l.width, l.height),
-                Some(above) => above.scaled(l.width, l.height),
-            };
-            if want[i] || l.since_key >= KEYFRAME_FRAMES {
-                l.encoder.force_intra_frame();
+        // the card takes every new frame; it keeps its own keyframe rhythm
+        if let Some(t) = &mut top
+            && is_fresh
+        {
+            let input = (frame.width, frame.height, frame.order);
+            if t.encoder.as_ref().is_none_or(|e| e.input != input) {
+                let out = out.clone();
+                let packets = move |keyframe, data| {
+                    let _ = out.blocking_send(ShareMsg::Packet(Packet { track: 0, keyframe, data }));
+                };
+                let rate = gpu_bitrate(t.width, t.height, fps);
+                // drop the old one first: two encoders on one card can be one too many
+                t.encoder = None;
+                let enc = gpu::GpuEncoder::start(&t.gpu, input, (t.width, t.height), fps, rate, fps * GPU_KEYFRAME_SECS, packets)
+                    .with_context(|| format!("starting the {} encoder", t.gpu.label()))?;
+                t.encoder = Some(enc);
             }
-            let yuv = YUVBuffer::from_vec(rgb.to_i420(), l.width, l.height);
-            picture = Some(rgb);
-            let bits = l.encoder.encode(&yuv).context("encoding the screen")?;
-            let keyframe = matches!(bits.frame_type(), FrameType::IDR | FrameType::I);
-            let data = bits.to_vec();
-            l.since_key = if keyframe { 0 } else { l.since_key + 1 };
-            if data.is_empty() {
-                continue;
+            if !t.encoder.as_mut().unwrap().push(frame) {
+                anyhow::bail!("the {} encoder stopped", t.gpu.label());
             }
-            let packet = Packet { track: i as u8, keyframe, data };
-            if out.blocking_send(ShareMsg::Packet(packet)).is_err() {
-                return Ok(());
+        }
+        // the CPU layers run at 30 at most
+        let cpu_every = if top.is_some() { (fps / FPS).max(1) as u64 } else { 1 };
+        let base = if top.is_some() { 1 } else { 0 };
+        let cpu_turn = frame_no % cpu_every == 0 || want[base..].contains(&true);
+        frame_no += 1;
+        if cpu_turn {
+            let mut picture: Option<convert::Rgb> = None;
+            for (i, l) in layers.iter_mut().enumerate() {
+                let track = base + i;
+                // each layer from the one above (cheaper than from the screen)
+                let rgb = match picture.take() {
+                    None => convert::Rgb::from_raw(frame, l.width, l.height),
+                    Some(above) => above.scaled(l.width, l.height),
+                };
+                if want[track] || l.since_key >= KEYFRAME_FRAMES {
+                    l.encoder.force_intra_frame();
+                }
+                let yuv = YUVBuffer::from_vec(rgb.to_i420(), l.width, l.height);
+                picture = Some(rgb);
+                let bits = l.encoder.encode(&yuv).context("encoding the screen")?;
+                let keyframe = matches!(bits.frame_type(), FrameType::IDR | FrameType::I);
+                let data = bits.to_vec();
+                l.since_key = if keyframe { 0 } else { l.since_key + 1 };
+                if data.is_empty() {
+                    continue;
+                }
+                let packet = Packet { track: track as u8, keyframe, data };
+                if out.blocking_send(ShareMsg::Packet(packet)).is_err() {
+                    return Ok(());
+                }
             }
         }
         // keep to the frame rate
@@ -318,11 +407,11 @@ fn encode_loop(
     Ok(())
 }
 
-/// The layers for a screen: the screen itself (scaled down to fit
-/// `MAX_SIZE`), then 720p and 360p versions when they're clearly smaller.
-fn ladder(width: usize, height: usize) -> Vec<(usize, usize)> {
+/// The layers for a screen: the screen itself (scaled down to fit `max`),
+/// then 720p and 360p versions when they're clearly smaller.
+fn ladder(width: usize, height: usize, max: (usize, usize)) -> Vec<(usize, usize)> {
     let even = |v: f64| ((v.round() as usize) & !1).max(16);
-    let scale = (MAX_SIZE.0 as f64 / width as f64).min(MAX_SIZE.1 as f64 / height as f64).min(1.0);
+    let scale = (max.0 as f64 / width as f64).min(max.1 as f64 / height as f64).min(1.0);
     let (tw, th) = (width as f64 * scale, height as f64 * scale);
     let mut out = vec![(even(tw), even(th))];
     for h in [720.0, 360.0] {
@@ -334,15 +423,22 @@ fn ladder(width: usize, height: usize) -> Vec<(usize, usize)> {
     out
 }
 
-/// What a layer aims for: about 4 Mbit/s at 1080p.
-fn bitrate(width: usize, height: usize) -> u32 {
-    ((width * height) as f64 * FPS as f64 * 0.07).clamp(300_000.0, 6_000_000.0) as u32
+/// What a CPU layer aims for: about 4 Mbit/s at 1080p30.
+fn bitrate(width: usize, height: usize, fps: u32) -> u32 {
+    ((width * height) as f64 * fps as f64 * 0.07).clamp(300_000.0, 8_000_000.0) as u32
 }
 
-fn new_encoder(width: usize, height: usize) -> Result<Encoder> {
+/// The card does better per bit, and big pictures need less per pixel:
+/// about 5 Mbit/s at 1080p30, 9 at 1080p60, 30 at 4K60.
+fn gpu_bitrate(width: usize, height: usize, fps: u32) -> u32 {
+    let pixels = (width * height) as f64 * fps as f64;
+    (pixels.powf(0.85) * 1.2).clamp(1_000_000.0, 40_000_000.0) as u32
+}
+
+fn new_encoder(width: usize, height: usize, fps: u32) -> Result<Encoder> {
     let config = EncoderConfig::new()
-        .bitrate(BitRate::from_bps(bitrate(width, height)))
-        .max_frame_rate(FrameRate::from_hz(FPS as f32))
+        .bitrate(BitRate::from_bps(bitrate(width, height, fps)))
+        .max_frame_rate(FrameRate::from_hz(fps as f32))
         .usage_type(UsageType::ScreenContentRealTime)
         .intra_frame_period(IntraFramePeriod::from_num_frames(KEYFRAME_FRAMES))
         .adaptive_quantization(false)
@@ -482,13 +578,16 @@ pub fn decode(packets: std::sync::mpsc::Receiver<Packet>, screen: Screen) {
 mod tests {
     use super::*;
 
+    const HD: (usize, usize) = (1920, 1080);
+
     #[test]
     fn layers() {
-        assert_eq!(ladder(1920, 1080), [(1920, 1080), (1280, 720), (640, 360)]);
-        assert_eq!(ladder(3840, 2160), [(1920, 1080), (1280, 720), (640, 360)]);
-        assert_eq!(ladder(1001, 701), [(1000, 700), (514, 360)]);
-        assert_eq!(ladder(3440, 1440), [(1920, 804), (860, 360)]);
-        assert_eq!(ladder(800, 450), [(800, 450)]);
+        assert_eq!(ladder(3840, 2160, (3840, 2160)), [(3840, 2160), (1280, 720), (640, 360)]);
+        assert_eq!(ladder(1920, 1080, HD), [(1920, 1080), (1280, 720), (640, 360)]);
+        assert_eq!(ladder(3840, 2160, HD), [(1920, 1080), (1280, 720), (640, 360)]);
+        assert_eq!(ladder(1001, 701, HD), [(1000, 700), (514, 360)]);
+        assert_eq!(ladder(3440, 1440, HD), [(1920, 804), (860, 360)]);
+        assert_eq!(ladder(800, 450, HD), [(800, 450)]);
     }
 
     /// A frame survives encoding and decoding (roughly: it's lossy).
@@ -501,7 +600,7 @@ mod tests {
             px.copy_from_slice(if x < w / 2 { &[255, 0, 0, 255] } else { &[0, 0, 255, 255] });
         }
         let raw = Raw { width: w, height: h, stride: w * 4, order: Order::Bgra, data };
-        let mut enc = new_encoder(w, h).unwrap();
+        let mut enc = new_encoder(w, h, FPS).unwrap();
         let yuv = YUVBuffer::from_vec(convert::Rgb::from_raw(&raw, w, h).to_i420(), w, h);
         let bits = enc.encode(&yuv).unwrap();
         assert!(matches!(bits.frame_type(), FrameType::IDR | FrameType::I));

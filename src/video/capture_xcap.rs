@@ -15,7 +15,7 @@ pub struct Capture {
 }
 
 impl Capture {
-    pub fn open() -> Result<Self> {
+    pub fn open(_fps: u32) -> Result<Self> {
         let monitors = Monitor::all().context("couldn't list the screens")?;
         let monitor = monitors
             .iter()

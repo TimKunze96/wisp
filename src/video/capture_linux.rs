@@ -17,7 +17,7 @@ use pw::spa::pod::{self, Pod, serialize::PodSerializer};
 use pw::spa::utils::{Direction, Fraction, Rectangle, SpaTypes};
 use pw::stream::{StreamFlags, StreamState};
 
-use super::{FPS, Latest, Order, Raw};
+use super::{Latest, Order, Raw};
 
 pub struct Capture {
     pub latest: Arc<Latest>,
@@ -28,7 +28,7 @@ pub struct Capture {
 
 impl Capture {
     /// Ask the desktop what to share and start receiving it.
-    pub fn open() -> Result<Self> {
+    pub fn open(fps: u32) -> Result<Self> {
         let (portal, node, fd) = futures::executor::block_on(ask())?;
         let latest = Arc::new(Latest::default());
         let (quit, quit_rx) = pw::channel::channel();
@@ -36,7 +36,7 @@ impl Capture {
         let thread = std::thread::Builder::new()
             .name("screen-capture".into())
             .spawn(move || {
-                if let Err(e) = receive(node, fd, &l, quit_rx) {
+                if let Err(e) = receive(node, fd, fps, &l, quit_rx) {
                     tracing::warn!("screen capture: {e:#}");
                 }
                 l.end();
@@ -83,7 +83,7 @@ async fn ask() -> Result<((Screencast, Session<Screencast>), u32, OwnedFd)> {
     Ok(((proxy, session), node, fd))
 }
 
-fn receive(node: u32, fd: OwnedFd, latest: &Arc<Latest>, quit: pw::channel::Receiver<()>) -> Result<()> {
+fn receive(node: u32, fd: OwnedFd, fps: u32, latest: &Arc<Latest>, quit: pw::channel::Receiver<()>) -> Result<()> {
     pw::init();
     let main_loop = pw::main_loop::MainLoopRc::new(None)?;
     let context = pw::context::ContextRc::new(&main_loop, None)?;
@@ -171,7 +171,7 @@ fn receive(node: u32, fd: OwnedFd, latest: &Arc<Latest>, quit: pw::channel::Rece
             Choice,
             Range,
             Fraction,
-            Fraction { num: FPS, denom: 1 },
+            Fraction { num: fps, denom: 1 },
             Fraction { num: 0, denom: 1 },
             Fraction { num: 1000, denom: 1 }
         ),
@@ -180,9 +180,9 @@ fn receive(node: u32, fd: OwnedFd, latest: &Arc<Latest>, quit: pw::channel::Rece
             Choice,
             Range,
             Fraction,
-            Fraction { num: FPS, denom: 1 },
+            Fraction { num: fps, denom: 1 },
             Fraction { num: 0, denom: 1 },
-            Fraction { num: FPS, denom: 1 }
+            Fraction { num: fps, denom: 1 }
         ),
     );
     let bytes = PodSerializer::serialize(Cursor::new(Vec::new()), &pod::Value::Object(format))

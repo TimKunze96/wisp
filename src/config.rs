@@ -74,6 +74,11 @@ pub struct Settings {
     pub echo_cancel: bool,
     /// Even out the loudness of the people we hear.
     pub auto_gain: bool,
+    /// Screen sharing: biggest picture height, frame rate, and whether the
+    /// graphics card encodes when it can.
+    pub screen_height: u32,
+    pub screen_fps: u32,
+    pub screen_gpu: bool,
     /// Turn other apps down while someone talks, to this fraction.
     pub ducking: bool,
     pub duck_level: f32,
@@ -138,6 +143,9 @@ impl Default for Settings {
             output_device: None,
             mic_volume: 1.0,
             output_volume: 1.0,
+            screen_height: 1080,
+            screen_fps: 30,
+            screen_gpu: true,
             voice_mode: VoiceMode::PushToTalk,
             vad_threshold_db: -40.0,
             ptt_release_ms: 0,

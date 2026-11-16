@@ -1027,7 +1027,9 @@ impl Session {
         }
         // video frames and 20 ms sound packets
         let (tx, mut rx) = mpsc::channel(32);
-        self.sharing = Some(Sharing::start(tx));
+        let s = &self.settings;
+        let options = crate::video::ShareOptions { max_height: s.screen_height, fps: s.screen_fps, gpu: s.screen_gpu };
+        self.sharing = Some(Sharing::start(options, tx));
         let (video, back, con) = (self.video.clone(), self.back.clone(), self.con_id);
         tokio::task::spawn_local(async move {
             let mut share = None;
@@ -1082,7 +1084,6 @@ impl Session {
                         data: &packet.data,
                     });
                     seq = seq.wrapping_add(1);
-                    if seq % 50 == 1 { eprintln!("DBG sound packets {seq} len {}", packet.data.len()); }
                     if let Ok(input) = InAudioBuf::try_new(Direction::S2C, out.into_vec()) {
                         let _ = audio.ts2a.lock().unwrap().play_packet(id, input);
                     }
