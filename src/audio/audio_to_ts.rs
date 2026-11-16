@@ -11,7 +11,7 @@ use tokio::sync::mpsc;
 use tokio::task::LocalSet;
 use tokio::time::{self, Duration};
 use tokio_stream::wrappers::IntervalStream;
-use tracing::{debug, error, warn};
+use tracing::{error, warn};
 
 use super::*;
 
@@ -101,6 +101,8 @@ impl AudioToTs {
 
     fn start(a2t: Arc<Mutex<Self>>, local_set: &LocalSet) {
         // Opens the stream and reopens it when the device goes away.
+        // retried every second: log each new problem once, not each try
+        let mut failing: Option<String> = None;
         local_set.spawn_local(
             IntervalStream::new(time::interval(Duration::from_secs(1))).for_each(move |_| {
                 let mut a2t = a2t.lock().unwrap();
@@ -108,9 +110,17 @@ impl AudioToTs {
                     match a2t.open_capture() {
                         Ok(s) => {
                             a2t.stream = Some(s);
-                            debug!("Opened capture device");
+                            if failing.take().is_some() {
+                                tracing::info!("Opened capture device");
+                            }
                         }
-                        Err(error) => error!(%error, "Failed to open capture device"),
+                        Err(error) => {
+                            let error = error.to_string();
+                            if failing.as_ref() != Some(&error) {
+                                error!(%error, "Failed to open capture device");
+                                failing = Some(error);
+                            }
+                        }
                     }
                 }
                 future::ready(())

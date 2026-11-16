@@ -80,6 +80,10 @@ signing-identity = "-"
 minimum-system-version = "11.0"
 info-plist-path = "packaging/macos/Info.plist"
 
+[package.metadata.packager.deb]
+# libvulkan1 is loaded at runtime, the rest is linked
+depends = ["libxcb1", "libxkbcommon0", "libxkbcommon-x11-0", "libasound2", "libvulkan1"]
+
 [package.metadata.packager.nsis]
 installer-icon = "assets/icons/wisp.ico"
 

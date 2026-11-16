@@ -137,6 +137,7 @@ pub(crate) async fn run(
 ) {
     let base = placeholder(con_id, &bookmark);
     if let Err(e) = connect_and_run(con_id, &bookmark, settings, audio, &mut rx, back.clone(), input_muted).await {
+        tracing::warn!("{}: {e:?}", bookmark.address);
         let mut snap = base;
         snap.status = Status::Failed(format!("{e:#}"));
         let _ = back.send(SessionMsg::Snap(snap));

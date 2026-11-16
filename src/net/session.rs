@@ -183,6 +183,7 @@ pub(crate) async fn run(
         pictures: None,
     };
     if let Err(e) = s.run(&bookmark, &mut rx, input_muted, output_muted).await {
+        tracing::warn!("{}: {e:?}", bookmark.address);
         let was_up = matches!(s.base.status, Status::Connected | Status::Reconnecting);
         if was_up && !s.kicked {
             let server = if s.base.server_name.is_empty() { s.base.label.clone() } else { s.base.server_name.clone() };
@@ -261,6 +262,10 @@ impl Session {
         }
         if !b.channel.trim().is_empty() {
             self.default_channel = Some((b.channel.clone(), Instant::now() + Duration::from_secs(5)));
+        }
+        {
+            let state = con.get_state()?;
+            tracing::info!("connected to {}: {} channels, {} clients", b.address, state.channels.len(), state.clients.len());
         }
         self.base.status = Status::Connected;
         {
@@ -1601,6 +1606,8 @@ fn connect_error(e: &anyhow::Error) -> String {
         ("Banned", "You are banned from this server"),
         ("ConnectionRefused", "The server refused the connection"),
         ("IdentityLevel", "The server needs a higher identity security level (Settings, Identities)"),
+        // the only clientinit field people type that has a size limit
+        ("ParameterInvalidSize", "Your nickname has to be 3 to 30 characters (Settings, Servers)"),
         ("Disconnected by the server", "Disconnected by the server"),
     ];
     known
