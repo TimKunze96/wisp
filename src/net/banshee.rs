@@ -12,7 +12,8 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use banshee_client::{
     Account, Channel, ChannelEdit, ChatTarget, Client, ClientMsg, Files, Identity, Key, Leave, NewChannel,
-    OfflineMessage, Options, Request, Role, ServerEdit, ServerInfo as Info, ServerMsg, User, UserId, Whisper, key_hex,
+    OfflineMessage, Options, Request, Role, ServerEdit, ServerInfo as Info, ServerMsg, User, UserId, Video, Watching,
+    Whisper, key_hex,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
@@ -26,6 +27,7 @@ use super::*;
 use crate::ConnectionId;
 use crate::config::{self, Bookmark, WhisperTarget};
 use crate::notify::EventKind;
+use crate::video::{Screen, ShareMsg, Sharing};
 
 pub const SCHEME: &str = "banshee://";
 
@@ -123,6 +125,11 @@ struct Session {
     avatars_requested: HashSet<(Key, String)>,
     /// A background task (transfer, avatar) changed something to show.
     dirty: Rc<Cell<bool>>,
+    video: Video,
+    /// Our screen, while we share it.
+    sharing: Option<Sharing>,
+    /// Screens we watch (or asked to).
+    watching: HashMap<UserId, Screen>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -198,15 +205,29 @@ async fn connect_and_run(
         avatar_dir: crate::config::cache_dir().join("avatars").join(session::sanitize(&bookmark.address)),
         avatars_requested: HashSet::new(),
         dirty: Default::default(),
+        video: client.video(),
+        sharing: None,
+        watching: HashMap::new(),
     };
     s.base.status = Status::Connected;
     s.base.platform = "Banshee".into();
+    s.base.screens = true;
     if input_muted {
         client.send(ClientMsg::SetMuted { input: true, output: false });
     }
     s.join_path(&client, &bookmark.channel);
     s.publish();
 
+    // screens arrive on their own task: reading a stream's header can't be cut short
+    let (screens_tx, mut screens) = mpsc::unbounded_channel();
+    let video = s.video.clone();
+    tokio::task::spawn_local(async move {
+        while let Ok(w) = video.next().await {
+            if screens_tx.send(w).is_err() {
+                break;
+            }
+        }
+    });
     let mut tick = tokio::time::interval(Duration::from_millis(100));
     loop {
         tokio::select! {
@@ -224,11 +245,18 @@ async fn connect_and_run(
                     None => bail!("Disconnected by the server"),
                 },
             },
+            Some(w) = screens.recv() => s.watch_stream(w),
             v = voice.recv() => match v {
                 Ok(v) => s.play(v),
                 Err(_) => bail!(s.removed.take().unwrap_or_else(|| "Disconnected by the server".into())),
             },
             _ = tick.tick() => {
+                s.watching.retain(|_, screen| !screen.ended());
+                for (id, screen) in &s.watching {
+                    if screen.wants_keyframe() {
+                        client.send(ClientMsg::WantKeyframe { user: *id });
+                    }
+                }
                 let running = s.transfers.borrow().iter().any(|t| t.state == TransferState::Running);
                 if s.dirty.replace(false) || running {
                     s.publish();
@@ -359,6 +387,25 @@ impl Session {
             SessionCmd::Files(cmd) => self.file_cmd(client, cmd),
             SessionCmd::SetAvatar(Some((path, _))) => self.set_avatar(path),
             SessionCmd::SetAvatar(None) => client.send(ClientMsg::ClearAvatar),
+            SessionCmd::Share(true) => self.share(),
+            SessionCmd::Share(false) => self.sharing = None,
+            SessionCmd::Watch(id, Some(screen), quality) => {
+                let id = UserId::from(id);
+                client.send(ClientMsg::Watch { user: id, quality });
+                if let Some(old) = self.watching.insert(id, screen) {
+                    old.end();
+                }
+            }
+            SessionCmd::WatchQuality(id, quality) => {
+                client.send(ClientMsg::SetQuality { user: UserId::from(id), quality });
+            }
+            SessionCmd::Watch(id, None, _) => {
+                let id = UserId::from(id);
+                if let Some(screen) = self.watching.remove(&id) {
+                    screen.end();
+                    client.send(ClientMsg::Unwatch { user: id });
+                }
+            }
             // avatars, recording notices, icons, details: TeamSpeak's
             _ => {}
         }
@@ -823,6 +870,11 @@ impl Session {
                 let name = self.channels.iter().find(|c| c.id == channel).map(|c| c.name.clone()).unwrap_or_default();
                 let _ = self.back.send(SessionMsg::NeedChannelPassword(self.con_id, channel.into(), name, wrong));
             }
+            ServerMsg::SendKeyframe { layer } => {
+                if let Some(s) = &self.sharing {
+                    s.keyframe(layer);
+                }
+            }
             ServerMsg::TokenCreated(t) => self.activity(&format!("New token: {}", t.token)),
             ServerMsg::Notice { text } => {
                 self.activity(&text);
@@ -962,6 +1014,60 @@ impl Session {
     }
 
     /// Send the current state to the manager.
+    /// Capture and encode on a thread; the stream to the server opens with
+    /// the first frame (so a cancelled picker shows nothing to others).
+    fn share(&mut self) {
+        if self.sharing.is_some() && self.me().is_some_and(|me| me.stream.is_some()) {
+            return;
+        }
+        let (tx, mut rx) = mpsc::channel(4);
+        self.sharing = Some(Sharing::start(tx));
+        let (video, back, con) = (self.video.clone(), self.back.clone(), self.con_id);
+        tokio::task::spawn_local(async move {
+            let mut share = None;
+            while let Some(msg) = rx.recv().await {
+                match msg {
+                    ShareMsg::Started(info) => match video.share(&info).await {
+                        Ok(s) => share = Some(s),
+                        Err(e) => {
+                            let _ = back.send(SessionMsg::Activity(con, format!("Couldn't share: {e:#}"), false));
+                            break;
+                        }
+                    },
+                    ShareMsg::Packet(p) => {
+                        if let Some(s) = share.as_mut()
+                            && s.send(&p).await.is_err()
+                        {
+                            break;
+                        }
+                    }
+                    ShareMsg::Failed(e) => {
+                        let _ = back.send(SessionMsg::Activity(con, e, false));
+                        break;
+                    }
+                }
+            }
+            if let Some(s) = share {
+                s.stop();
+            }
+        });
+    }
+
+    /// A screen we asked for arrived: decode it onto its viewer.
+    fn watch_stream(&mut self, mut w: Watching) {
+        let Some(screen) = self.watching.get(&w.from).cloned() else { return };
+        tokio::task::spawn_local(async move {
+            let (tx, rx) = std::sync::mpsc::channel();
+            crate::video::decode(rx, screen.clone());
+            while let Ok(Some(packet)) = w.packet().await {
+                if screen.ended() || tx.send(packet).is_err() {
+                    break;
+                }
+            }
+            screen.end();
+        });
+    }
+
     fn publish(&mut self) {
         self.fetch_avatars();
         let mut snap = self.base.clone();
@@ -1051,6 +1157,7 @@ impl Session {
             icon: None,
             volume: 1.0,
             locally_muted: false,
+            stream: u.stream.clone(),
             uid: key_hex(&u.key),
         }
     }

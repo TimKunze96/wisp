@@ -177,6 +177,12 @@ pub enum Cmd {
     Record(Option<bool>),
     /// Whether the main window has focus (no chat popups then).
     Focused(bool),
+    /// Start or stop sharing our screen (Banshee servers).
+    Share { con: ConId, on: bool },
+    /// Watch someone's screen onto `screen`, or stop (None).
+    Watch { con: ConId, client: u16, screen: Option<crate::video::Screen>, quality: crate::video::Quality },
+    /// Change the quality of a screen we watch.
+    WatchQuality { con: ConId, client: u16, quality: crate::video::Quality },
     /// Disconnect everything, then answer.
     Shutdown(oneshot::Sender<()>),
 }
@@ -246,6 +252,8 @@ pub struct ClientRow {
     pub talk_request: Option<String>,
     pub volume: f32,
     pub locally_muted: bool,
+    /// Sharing their screen: its layers and viewer count.
+    pub stream: Option<crate::video::StreamInfo>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -327,6 +335,8 @@ pub struct ServerSnap {
     /// (cached picture, link, tooltip).
     pub banner: Option<(PathBuf, String)>,
     pub host_button: Option<(PathBuf, String, String)>,
+    /// The server does screen sharing.
+    pub screens: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -418,6 +428,9 @@ pub(crate) enum SessionCmd {
     CloseChat(ChatKind),
     Admin(AdminAction),
     ChannelDescription(u64),
+    Share(bool),
+    Watch(u16, Option<crate::video::Screen>, crate::video::Quality),
+    WatchQuality(u16, crate::video::Quality),
 }
 
 #[derive(Clone)]
@@ -825,6 +838,9 @@ impl Manager {
             Cmd::Write { con, write } => to(self, con, SessionCmd::Write(write)),
             Cmd::ServerInfo { con, reply } => to(self, con, SessionCmd::ServerInfo(reply)),
             Cmd::Files { con, cmd } => to(self, con, SessionCmd::Files(cmd)),
+            Cmd::Share { con, on } => to(self, con, SessionCmd::Share(on)),
+            Cmd::Watch { con, client, screen, quality } => to(self, con, SessionCmd::Watch(client, screen, quality)),
+            Cmd::WatchQuality { con, client, quality } => to(self, con, SessionCmd::WatchQuality(client, quality)),
             Cmd::FetchIcons { con, ids } => to(self, con, SessionCmd::FetchIcons(ids)),
             Cmd::SetAvatar(a) => {
                 for s in self.sessions.values() {

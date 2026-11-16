@@ -381,6 +381,16 @@ pub fn user_menu(
                 }
             }))
             .item(row("hand", "Poke...", colors().muted).on_click(ask(PromptKind::Poke)));
+        if d.row.stream.is_some() {
+            let m = model.clone();
+            menu = menu.item(row("monitor-play", "Watch screen", colors().muted).on_click(move |_, _, cx| {
+                m.update(cx, |m, cx| m.stage(Some((con, id)), cx))
+            }));
+            let (m, name) = (model.clone(), name.clone());
+            menu = menu.item(row("external-link", "Watch in its own window", colors().muted).on_click(move |_, _, cx| {
+                super::open_screen(&m, con, id, name.clone(), cx)
+            }));
+        }
 
         let (m, u, muted) = (model.clone(), uid.clone(), d.row.locally_muted);
         menu = menu.item(

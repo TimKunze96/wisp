@@ -37,13 +37,16 @@ flate2 = "1"
 sha2 = "0.10"
 crc32fast = "1"
 reqwest = { version = "0.13", default-features = false }
-banshee-client = { git = "https://github.com/TimKunze96/banshee", rev = "da0c19d780c4545a802380f8a6fa415fb7c32fd6" }
+openh264 = "0.9.10"
+banshee-client = { git = "https://github.com/TimKunze96/banshee", rev = "c8e2ae71d168f31a3ce3570c2709ff734cbe5671" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = { version = "0.3.6", features = ["blocking"] }
-ashpd = { version = "0.13", default-features = false, features = ["async-io", "global_shortcuts"] }
+ashpd = { version = "0.13", default-features = false, features = ["async-io", "global_shortcuts", "screencast"] }
+pipewire = "0.10.1"
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
+xcap = "0.9.10"
 tray-icon = "0.26"
 global-hotkey = "0.9"
 notify-rust = "4"

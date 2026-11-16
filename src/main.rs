@@ -16,6 +16,7 @@ mod net;
 mod tray;
 mod ui;
 mod update;
+mod video;
 
 use gpui_kit::App;
 

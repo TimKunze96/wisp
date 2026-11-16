@@ -105,6 +105,7 @@ fn person(id: u16, name: &str, who: Who) -> ClientRow {
         talk_request: None,
         volume: 1.0,
         locally_muted: false,
+        stream: None,
     }
 }
 
@@ -174,6 +175,7 @@ fn server(con: u64, bookmark: &str, name: &str, channels: Vec<ChannelRow>, own: 
         transfers: Vec::new(),
         banner: None,
         host_button: None,
+        screens: false,
     }
 }
 

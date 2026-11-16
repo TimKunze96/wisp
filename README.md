@@ -109,7 +109,9 @@ voice server you can run yourself: add a bookmark with the address
 `banshee://host:7700#fingerprint`. Voice, whispers, channel/server/private
 chat, pokes, roles (shown as server groups), kicks, bans and channel editing
 work there, and so do channel files, avatars, offline messages and the server
-log.
+log. You can also share your screen there (the button next to Talk) and watch
+other people's screens in your channel (the screen icon next to their name).
+It goes up to 1080p at 30 frames a second, encoded as H.264.
 
 Windows and macOS builds are new and barely tested. Hotkeys are registered with
 the system there, and echo cancellation and lowering other apps are Linux-only
@@ -139,7 +141,8 @@ and Wisp refuses anything that doesn't match the key built into it.
 
 ## Building
 
-Needs Rust 1.88 or newer, CMake and a C compiler (for Opus).
+Needs Rust 1.88 or newer, CMake, a C and C++ compiler (for Opus and OpenH264)
+and, on Linux, the PipeWire headers (`libpipewire-0.3-dev`, for screen sharing).
 
 ```sh
 cargo build --release

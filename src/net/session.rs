@@ -50,6 +50,7 @@ pub(crate) fn placeholder(con: ConId, b: &Bookmark) -> ServerSnap {
         transfers: Vec::new(),
         banner: None,
         host_button: None,
+        screens: false,
     }
 }
 
@@ -566,6 +567,7 @@ impl Session {
                         self.inspect_vars_sent = None;
                         self.last_stats = None;
                     }
+                    Some(SessionCmd::Share(_) | SessionCmd::Watch(..) | SessionCmd::WatchQuality(..)) => {}
                     Some(SessionCmd::ChannelDescription(id)) => {
                         if let Some(c) = con.get_state()?.channels.get(&ChannelId(id)) {
                             let _ = c.description().to_packet().send(&mut con);
@@ -1258,6 +1260,7 @@ impl Session {
                         icon: (cl.icon.0 != 0).then(|| self.badge("", cl.icon.0)),
                         volume: self.settings.user_volumes.get(&uid).copied().unwrap_or(1.0),
                         locally_muted: self.settings.user_muted.contains(&uid),
+                        stream: None,
                         uid,
                     }
                 })

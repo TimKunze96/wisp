@@ -61,6 +61,8 @@ pub struct MainView {
     pub(super) palette: Option<super::palette::Palette>,
     focus: gpui_kit::FocusHandle,
     cursor: Option<Cursor>,
+    /// The stream bar shows everyone in the channel, not just who shares.
+    bar_everyone: bool,
 }
 
 /// TeamSpeak spacer channels: `[spacer]`, `[cspacer]`, `[rspacer]`, `[*spacer]`,
@@ -246,6 +248,7 @@ impl MainView {
             palette: None,
             focus,
             cursor: None,
+            bar_everyone: false,
         }
     }
 
@@ -611,6 +614,7 @@ impl MainView {
                 .child(footer_row())
                 .into_any_element();
         };
+        let staged = m.staged.filter(|k| k.0 == server.con).and_then(|k| m.feeds.get(&k)).cloned();
         v_flex()
             .flex_1()
             .min_w_0()
@@ -624,9 +628,26 @@ impl MainView {
                         .child(div().flex_1().child(Input::new(&self.filter).cleanable(true))),
                 )
             })
-            .child(self.tree(&server, cx))
+            .map(|d| {
+                match staged {
+                    Some(feed) => d.child(super::streams::stage(&self.model, &feed, cx)),
+                    None => d.child(self.tree(&server, cx)),
+                }
+            })
+            .when_some(self.stream_bar(&server, cx), |d, bar| d.child(bar))
             .child(self.talk_bar(cx))
             .into_any_element()
+    }
+
+    fn stream_bar(&self, s: &ServerSnap, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let view = cx.entity().downgrade();
+        let toggle = move |cx: &mut gpui_kit::App| {
+            let _ = view.update(cx, |v, cx| {
+                v.bar_everyone = !v.bar_everyone;
+                cx.notify();
+            });
+        };
+        super::streams::bar(&self.model, s, self.bar_everyone, toggle, cx)
     }
 
     fn server_header(&self, s: &ServerSnap, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1131,6 +1152,22 @@ impl MainView {
             .when(cl.commander, |d| d.child(status("megaphone", colors().muted)))
             .when(cl.priority, |d| d.child(status("zap", colors().muted)))
             .when(cl.recording, |d| d.child(status("circle-dot", colors().red)))
+            .when(cl.stream.is_some(), |d| {
+                let model = self.model.clone();
+                d.child(
+                    div()
+                        .id(SharedString::from(format!("st-{con}-{id}")))
+                        .cursor_pointer()
+                        .tooltip(|w, cx| Tooltip::new("Sharing their screen").build(w, cx))
+                        .when(!cl.me, |d| {
+                            d.on_click(move |_, _, cx| {
+                                cx.stop_propagation();
+                                model.update(cx, |m, cx| m.stage(Some((con, id)), cx))
+                            })
+                        })
+                        .child(status("monitor-up", colors().accent)),
+                )
+            })
             .when(cl.away.is_some(), |d| d.child(status("moon", colors().dim)))
             .when_some(cl.talk_request.clone(), |d, msg| {
                 let tip = if msg.is_empty() { "Asks for talk power".to_string() } else { format!("Asks for talk power: {msg}") };
@@ -1198,6 +1235,14 @@ impl MainView {
                             }),
                     ),
             )
+            .when_some(snap.active_server().filter(|s| s.screens).map(|s| s.con), |d, con| {
+                let on = snap.active_server().and_then(|s| s.channels.iter().flat_map(|c| &c.clients).find(|c| c.me)).is_some_and(|c| c.stream.is_some());
+                d.child(
+                    icon_button("share", "monitor-up", if on { colors().accent } else { colors().muted }, on)
+                        .tooltip(move |w, cx| Tooltip::new(if on { "Stop sharing your screen" } else { "Share your screen" }).build(w, cx))
+                        .on_click(cx.listener(move |this, _, _, cx| this.send(cx, Cmd::Share { con, on: !on }))),
+                )
+            })
             .child({
                 let rec = snap.recording.clone();
                 let on = rec.is_some();
