@@ -1080,9 +1080,15 @@ impl Session {
         let Some(screen) = self.watching.get(&w.from).cloned() else { return };
         let audio = self.audio.clone();
         let id = stream_sound_id(self.con_id, w.from);
+        let layers: Vec<(u16, u16)> = self
+            .users
+            .get(&w.from)
+            .and_then(|u| u.stream.as_ref())
+            .map(|s| s.layers.iter().map(|l| (l.width, l.height)).collect())
+            .unwrap_or_default();
         tokio::task::spawn_local(async move {
             let (tx, rx) = std::sync::mpsc::channel();
-            crate::video::decode(rx, screen.clone());
+            crate::video::decode(rx, screen.clone(), layers);
             let mut seq = 0u16;
             while let Ok(Some(packet)) = w.packet().await {
                 if screen.ended() {

@@ -44,7 +44,7 @@ impl Gpu {
 }
 
 /// The ffmpeg next to Wisp's config or on the PATH.
-fn ffmpeg() -> Option<PathBuf> {
+pub(super) fn ffmpeg() -> Option<PathBuf> {
     let exe = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
     let local = crate::config::config_dir().join(exe);
     if local.is_file() {
@@ -117,7 +117,7 @@ fn works(g: &Gpu) -> bool {
 }
 
 /// No console window flashing up on Windows.
-fn quiet(_cmd: &mut Command) {
+pub(super) fn quiet(_cmd: &mut Command) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

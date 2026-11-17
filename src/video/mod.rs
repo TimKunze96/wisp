@@ -3,6 +3,7 @@
 
 mod convert;
 pub mod gpu;
+mod hwdecode;
 #[cfg(target_os = "linux")]
 #[path = "sound_linux.rs"]
 mod sound;
@@ -825,10 +826,15 @@ impl Screen {
 
 /// Decode frames from `frames` onto `screen` until the sender goes away.
 /// Decode video packets from `packets` onto `screen` until the sender goes away.
-pub fn decode(packets: std::sync::mpsc::Receiver<Packet>, screen: Screen) {
+///
+/// `layers` are the stream's layer sizes: the big ones decode on the
+/// graphics card when ffmpeg can, the rest (and anything that fails) here.
+pub fn decode(packets: std::sync::mpsc::Receiver<Packet>, screen: Screen, layers: Vec<(u16, u16)>) {
     std::thread::Builder::new()
         .name("screen-decode".into())
         .spawn(move || {
+            let mut hw: Option<hwdecode::HwDecoder> = None;
+            let mut hw_failed = false;
             let mut decoder = match Decoder::new() {
                 Ok(d) => d,
                 Err(e) => {
@@ -843,6 +849,34 @@ pub fn decode(packets: std::sync::mpsc::Receiver<Packet>, screen: Screen) {
                 }
             };
             while let Some(mut packet) = video() {
+                screen.0.layer.store(packet.track, Ordering::Relaxed);
+                let size = layers.get(packet.track as usize).copied();
+                let big = size.is_some_and(|(_, h)| h >= hwdecode::MIN_HEIGHT);
+                if big && !hw_failed && hwdecode::available() {
+                    let size = size.unwrap();
+                    if hw.as_ref().is_none_or(|d| d.size != size) {
+                        hw = None;
+                        // it can only start from a full picture
+                        if !packet.keyframe {
+                            screen.0.want_key.store(true, Ordering::Relaxed);
+                            continue;
+                        }
+                        hw = hwdecode::HwDecoder::start(size, screen.clone());
+                        hw_failed = hw.is_none();
+                    }
+                    if let Some(d) = hw.as_mut() {
+                        if d.push(&packet.data) {
+                            continue;
+                        }
+                        tracing::warn!("hardware decoder stopped, decoding on the CPU");
+                        hw = None;
+                        hw_failed = true;
+                        screen.0.want_key.store(true, Ordering::Relaxed);
+                        continue;
+                    }
+                } else {
+                    hw = None;
+                }
                 // if we fell behind, all go through the decoder but only the last is shown
                 while let Ok(newer) = packets.try_recv() {
                     if !newer.is_audio() {
@@ -850,7 +884,6 @@ pub fn decode(packets: std::sync::mpsc::Receiver<Packet>, screen: Screen) {
                         packet = newer;
                     }
                 }
-                screen.0.layer.store(packet.track, Ordering::Relaxed);
                 match decoder.decode(&packet.data) {
                     Ok(Some(yuv)) => {
                         use openh264::formats::YUVSource;
@@ -937,7 +970,7 @@ mod tests {
 
         let (screen, _wake) = Screen::new();
         let (tx, rx) = std::sync::mpsc::channel();
-        decode(rx, screen.clone());
+        decode(rx, screen.clone(), Vec::new());
         tx.send(Packet { track: 0, keyframe: true, data }).unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
         let pic = loop {
