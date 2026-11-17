@@ -202,7 +202,7 @@ impl SettingsView {
 
     // ---- servers -------------------------------------------------------
 
-    fn edit(&mut self, b: Bookmark, is_new: bool, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn edit(&mut self, b: Bookmark, is_new: bool, window: &mut Window, cx: &mut Context<Self>) {
         let field = |v: String, ph: &str, masked: bool, window: &mut Window, cx: &mut Context<Self>| {
             let ph = ph.to_string();
             cx.new(|cx| InputState::new(window, cx).placeholder(ph).masked(masked).default_value(v))

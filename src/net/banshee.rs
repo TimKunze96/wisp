@@ -518,7 +518,8 @@ impl Session {
                 let Ok(id) = u32::try_from(channel) else { return };
                 ClientMsg::DeleteChannel { id }
             }
-            AdminAction::ChannelGroup { .. } | AdminAction::Subscribe { .. } => return,
+            // everything is always visible on Banshee
+            AdminAction::ChannelGroup { .. } | AdminAction::Subscribe { .. } | AdminAction::SubscribeAll { .. } => return,
         };
         client.send(msg);
     }

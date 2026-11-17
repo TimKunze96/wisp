@@ -1590,6 +1590,10 @@ fn admin(con: &mut Connection, action: &AdminAction) -> Result<(tsclientlib::Mes
             let what = if *on { format!("Subscribed to {}", c.name) } else { format!("Unsubscribed from {}", c.name) };
             (c.set_subscribed(*on), what)
         }
+        AdminAction::SubscribeAll { on } => {
+            let what = if *on { "Subscribed to all channels" } else { "Unsubscribed from all channels" };
+            (state.server.set_subscribed(*on), what.to_string())
+        }
         AdminAction::MoveChannel { channel, parent, after } => {
             let c = state.channels.get(&ChannelId(*channel)).ok_or_else(|| anyhow::anyhow!("channel is gone"))?;
             // channelmove only changes the parent; reordering is an edit

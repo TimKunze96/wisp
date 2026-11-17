@@ -363,6 +363,15 @@ pub fn open_screen(model: &Entity<Model>, con: ConId, client: u16, name: String,
     }
 }
 
+/// Settings, on the form for one saved server.
+pub fn edit_bookmark(model: &Entity<Model>, id: &str, cx: &mut App) {
+    open_settings(model, SettingsTab::Servers, cx);
+    let m = model.read(cx);
+    let Some(b) = m.settings.bookmarks.iter().find(|b| b.id == id).cloned() else { return };
+    let (Some(w), Some(view)) = (m.settings_window, m.settings_view.as_ref().and_then(|v| v.upgrade())) else { return };
+    let _ = w.update(cx, |_, window, cx| view.update(cx, |v, cx| v.edit(b, false, window, cx)));
+}
+
 pub fn open_settings(model: &Entity<Model>, tab: SettingsTab, cx: &mut App) {
     let (window, view) = {
         let m = model.read(cx);

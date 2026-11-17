@@ -53,6 +53,8 @@ pub enum AdminAction {
     MoveChannel { channel: u64, parent: u64, after: u64 },
     DeleteChannel { channel: u64 },
     Subscribe { channel: u64, on: bool },
+    /// Every channel of the server.
+    SubscribeAll { on: bool },
 }
 
 #[derive(Clone, Debug)]

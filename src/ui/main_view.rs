@@ -466,6 +466,8 @@ impl MainView {
         let con = server.map(|s| s.con);
         let bookmark = b.clone();
         let name = if b.label.is_empty() { b.address.clone() } else { b.label.clone() };
+        let (view, model, saved) = (cx.entity().downgrade(), self.model.clone(), b.clone());
+        let live = con.filter(|_| connected);
         h_flex()
             .id(SharedString::from(format!("bm-{}", b.id)))
             .group("bm")
@@ -540,6 +542,7 @@ impl MainView {
                         })),
                 )
             })
+            .context_menu(move |menu, _, cx| super::menus::bookmark_menu(menu, &saved, live, &model, &view, cx))
     }
 
     fn self_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -658,8 +661,17 @@ impl MainView {
         let name = if s.server_name.is_empty() { s.label.clone() } else { s.server_name.clone() };
         let details = format!("{} · {} {}", s.label, s.platform, s.version.split(' ').next().unwrap_or(""));
         let dot = || div().size(px(3.)).rounded_full().bg(rgb(colors().dim));
+        let (view, model) = (cx.entity().downgrade(), self.model.clone());
         header_row()
-            .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).truncate().child(name))
+            .child(
+                div()
+                    .id("server-name")
+                    .text_sm()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .truncate()
+                    .child(name)
+                    .context_menu(move |menu, _, cx| super::menus::server_menu(menu, con, &model, &view, cx)),
+            )
             .child(div().flex_1())
             .child(
                 h_flex()
@@ -779,14 +791,13 @@ impl MainView {
                 }
             }
         }
-        // the empty space below: right-click for a new top-level channel
-        let view = cx.entity().downgrade();
-        let con = s.con;
+        // the empty space below: right-click for the server menu
+        let (view, model, con) = (cx.entity().downgrade(), self.model.clone(), s.con);
         let below = div()
             .id("tree-below")
             .flex_grow(1.)
             .min_h(px(120.))
-            .context_menu(move |menu, _, _| super::menus::tree_menu(menu, con, &view));
+            .context_menu(move |menu, _, cx| super::menus::server_menu(menu, con, &model, &view, cx));
         v_flex().id("tree").flex_1().overflow_y_scroll().child(col).child(below)
     }
 
