@@ -196,7 +196,7 @@ impl Feed {
     }
 
     pub fn viewers(&self) -> u32 {
-        self.info.as_ref().map_or(0, |i| i.viewers)
+        self.info.as_ref().map_or(0, |i| i.viewers.len() as u32)
     }
 
     /// The picture, or a line saying why there's none, filling its box.
@@ -366,6 +366,32 @@ pub fn sound_controls(feed: &Entity<Feed>, cx: &App) -> Option<impl IntoElement>
     )
 }
 
+/// Who watches a stream, by name.
+pub fn watcher_names(model: &Entity<Model>, f: &Feed, cx: &App) -> String {
+    let Some(info) = &f.info else { return String::new() };
+    let snap = &model.read(cx).snap;
+    let Some(s) = snap.server(f.con) else { return String::new() };
+    let names: Vec<String> = info
+        .viewers
+        .iter()
+        .filter_map(|id| u16::try_from(*id).ok())
+        .map(|id| find(s, id).map_or_else(|| "someone who left".to_string(), |(c, _)| c.name.clone()))
+        .collect();
+    names.join(", ")
+}
+
+/// "1080p · 3 watching", with who watches when you hover it.
+pub fn status(model: &Entity<Model>, feed: &Entity<Feed>, cx: &App) -> impl IntoElement {
+    let f = feed.read(cx);
+    let names = watcher_names(model, f, cx);
+    div()
+        .id("stream-status")
+        .text_xs()
+        .text_color(rgb(colors().muted))
+        .when(!names.is_empty(), |d| d.tooltip(move |w, cx| Tooltip::new(names.clone()).build(w, cx)))
+        .child(status_line(f))
+}
+
 /// "1080p · 3 watching"
 pub fn status_line(f: &Feed) -> String {
     let viewers = match f.viewers() {
@@ -394,7 +420,7 @@ pub fn stage(model: &Entity<Model>, feed: &Entity<Feed>, cx: &App) -> impl IntoE
                 .items_center()
                 .child(icon("monitor-up", 15., colors().accent))
                 .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(f.name.clone()))
-                .child(div().text_xs().text_color(rgb(colors().muted)).child(status_line(f)))
+                .child(status(model, feed, cx))
                 .child(div().flex_1())
                 .children(sound_controls(feed, cx))
                 .children(quality_picker(feed, cx))
@@ -462,7 +488,14 @@ pub fn bar(model: &Entity<Model>, s: &ServerSnap, everyone: bool, on_toggle: imp
                 .child(if *me { "You're sharing" } else { "" })
                 .into_any_element(),
         };
-        let viewers = info.viewers;
+        let viewers = info.viewers.len();
+        let names: Vec<String> = info
+            .viewers
+            .iter()
+            .filter_map(|id| u16::try_from(*id).ok())
+            .filter_map(|id| find(s, id).map(|(c, _)| c.name.clone()))
+            .collect();
+        let names = names.join(", ");
         tiles.push(
             v_flex()
                 .id(SharedString::from(format!("tile-{}-{id}", s.con)))
@@ -500,6 +533,8 @@ pub fn bar(model: &Entity<Model>, s: &ServerSnap, everyone: bool, on_toggle: imp
                         .when(viewers > 0, |d| {
                             d.child(
                                 h_flex()
+                                    .id(SharedString::from(format!("viewers-{}-{id}", s.con)))
+                                    .tooltip(move |w, cx| Tooltip::new(names.clone()).build(w, cx))
                                     .absolute()
                                     .top(px(5.))
                                     .right(px(5.))

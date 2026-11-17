@@ -577,7 +577,7 @@ fn encode_loop(
                     bitrate: bitrate(width, height, cpu_fps),
                 });
             }
-            let info = StreamInfo { layers: info, audio, viewers: 0 };
+            let info = StreamInfo { layers: info, audio, viewers: Vec::new() };
             if out.blocking_send(ShareMsg::Started(info)).is_err() {
                 break;
             }

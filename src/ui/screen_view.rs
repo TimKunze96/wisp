@@ -10,7 +10,7 @@ use gpui_kit::{
 
 use super::Model;
 use super::colors::colors;
-use super::streams::{Feed, quality_picker, sound_controls, status_line, tool_button};
+use super::streams::{Feed, quality_picker, sound_controls, tool_button};
 use super::widgets::*;
 
 pub struct ScreenView {
@@ -96,7 +96,7 @@ impl ScreenView {
                         .border_color(border())
                         .child(icon("monitor-up", 15., colors().accent))
                         .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(f.name.clone()))
-                        .child(div().text_xs().text_color(rgb(colors().muted)).child(status_line(f)))
+                        .child(super::streams::status(&self.model, &self.feed, cx))
                         .child(div().flex_1())
                         .children(sound_controls(&self.feed, cx))
                         .children(quality_picker(&self.feed, cx))
