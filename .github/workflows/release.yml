@@ -47,12 +47,16 @@ jobs:
       - name: Install dependencies (Ubuntu only)
         if: startsWith(matrix.platform, 'ubuntu')
         run: |
-          # 22.04's PipeWire (0.3.48) is too old for the bindings' headers; the
-          # functions we call all exist in it, so the binary still runs there
-          sudo add-apt-repository -y ppa:pipewire-debian/pipewire-upstream
           sudo apt-get update
           sudo apt-get install -y gcc g++ clang cmake pkg-config libasound2-dev libfontconfig-dev \
             libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libssl-dev libzstd-dev libvulkan1 libpipewire-0.3-dev
+          # 22.04's PipeWire headers (0.3.48) are too old for the bindings; 24.04's
+          # are new enough, and everything we call exists in 0.3.48, so the binary
+          # still runs on 22.04 (only the headers change, not the library)
+          for p in libpipewire-0.3-dev libspa-0.2-dev; do
+            curl -sSfLO "http://archive.ubuntu.com/ubuntu/pool/main/p/pipewire/${p}_1.0.5-1_amd64.deb"
+          done
+          sudo dpkg -i --force-depends libpipewire-0.3-dev_1.0.5-1_amd64.deb libspa-0.2-dev_1.0.5-1_amd64.deb
 
       - uses: dtolnay/rust-toolchain@stable
         with:
