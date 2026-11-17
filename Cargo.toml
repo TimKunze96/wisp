@@ -46,6 +46,7 @@ ashpd = { version = "0.13", default-features = false, features = ["async-io", "g
 pipewire = "0.10.1"
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
+raw-window-handle = "0.6.2"
 tray-icon = "0.26"
 global-hotkey = "0.9"
 notify-rust = "4"
@@ -53,12 +54,13 @@ notify-rust = "4"
 [target.'cfg(target_os = "macos")'.dependencies]
 screencapturekit = { version = "11.1.2", features = ["macos_14_0"] }
 apple-cf = { version = "0.11", default-features = false, features = ["cg"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSGraphics", "NSResponder", "NSView", "NSWindow"] }
 
 [target.'cfg(windows)'.dependencies]
 xcap = "0.9.10"
 wasapi = "0.27.0"
 winreg = "0.56"
-windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
+windows-sys = { version = "0.61", features = ["Win32_System_Console", "Win32_UI_WindowsAndMessaging"] }
 
 [build-dependencies]
 winresource = "0.1"

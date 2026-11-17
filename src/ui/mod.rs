@@ -4,6 +4,7 @@ mod admin;
 mod bbcode;
 mod files_view;
 mod frame;
+mod pin;
 mod icons;
 mod palette;
 mod screen_view;

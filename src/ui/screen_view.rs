@@ -15,6 +15,8 @@ use super::widgets::*;
 pub struct ScreenView {
     model: Entity<Model>,
     feed: Entity<Feed>,
+    /// Kept above other windows.
+    pinned: bool,
 }
 
 impl ScreenView {
@@ -25,7 +27,7 @@ impl ScreenView {
         })
         .detach();
         window.set_window_title(&format!("{}'s screen", feed.read(cx).name));
-        Self { model, feed }
+        Self { model, feed, pinned: false }
     }
 }
 
@@ -68,7 +70,23 @@ impl ScreenView {
                         .child(div().text_xs().text_color(rgb(colors().muted)).child(status_line(f)))
                         .child(div().flex_1())
                         .children(sound_controls(&self.feed, cx))
-                        .child(quality_picker(&self.feed, cx))
+                        .children(quality_picker(&self.feed, cx))
+                        .when(super::pin::AVAILABLE, |d| {
+                            let pinned = self.pinned;
+                            d.child(
+                                tool_button(
+                                    "pin",
+                                    if pinned { "pin-off" } else { "pin" },
+                                    if pinned { "Stop keeping on top" } else { "Keep on top of other windows" },
+                                )
+                                .when(pinned, |b| b.bg(active_bg()))
+                                .on_click(cx.listener(|t, _, window, cx| {
+                                    t.pinned = !t.pinned;
+                                    super::pin::set(window, t.pinned);
+                                    cx.notify();
+                                })),
+                            )
+                        })
                         .child(tool_button("fullscreen", "maximize", "Fullscreen (or double-click)").on_click(
                             |_, window, _| window.toggle_fullscreen(),
                         ))

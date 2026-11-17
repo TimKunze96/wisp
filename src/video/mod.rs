@@ -133,6 +133,8 @@ const MAX_FPS: u32 = 240;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Order {
     Bgra,
+    // ScreenCaptureKit always hands over BGRA
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     Rgba,
 }
 
@@ -240,6 +242,41 @@ impl SoundEncoder {
     }
 }
 
+/// Views of our own share, filled straight from the encoder.
+static PREVIEWS: Mutex<Vec<Screen>> = Mutex::new(Vec::new());
+/// How often the preview gets a new picture.
+const PREVIEW_EVERY: Duration = Duration::from_millis(66);
+
+/// Watch our own share as it goes out (no server round trip). It ends with
+/// the share; `end()` it to stop watching.
+pub fn preview() -> (Screen, fmpsc::Receiver<()>) {
+    let (screen, changed) = Screen::new();
+    PREVIEWS.lock().unwrap().push(screen.clone());
+    (screen, changed)
+}
+
+fn previewing() -> bool {
+    let mut p = PREVIEWS.lock().unwrap();
+    p.retain(|s| !s.ended());
+    !p.is_empty()
+}
+
+fn show_preview(rgb: &convert::Rgb) {
+    let mut bgra = Vec::with_capacity(rgb.width * rgb.height * 4);
+    for px in rgb.data.chunks_exact(3) {
+        bgra.extend_from_slice(&[px[2], px[1], px[0], 255]);
+    }
+    for s in PREVIEWS.lock().unwrap().iter() {
+        s.show(Picture { width: rgb.width as u32, height: rgb.height as u32, bgra: bgra.clone() });
+    }
+}
+
+fn end_previews() {
+    for s in PREVIEWS.lock().unwrap().drain(..) {
+        s.end();
+    }
+}
+
 /// From the share thread to the session.
 pub enum ShareMsg {
     /// The first frame arrived: the layers we'll send.
@@ -317,6 +354,7 @@ fn share(
     source.latest.set_fps(options.fps.clamp(1, MAX_FPS));
     let sound = if options.sound { sound(out) } else { None };
     let result = encode_loop(options, &source.latest, stop, keyframes, out, sound.is_some());
+    end_previews();
     drop(sound);
     // dropping the source closes the capture
     drop(source);
@@ -489,6 +527,9 @@ fn encode_loop(
     let frame_time = Duration::from_secs(1) / fps;
     let mut next = Instant::now();
     let mut frame_no: u64 = 0;
+    // the preview comes from the CPU layer closest to 720p
+    let mut preview_layer = 0;
+    let mut last_preview = Instant::now() - PREVIEW_EVERY;
     while !stop.load(Ordering::Relaxed) && !out.is_closed() {
         let fresh = match latest.take(Duration::from_millis(200)) {
             Ok(f) => f,
@@ -526,6 +567,9 @@ fn encode_loop(
             for &(width, height) in cpu_sizes {
                 let encoder = new_encoder(width, height, cpu_fps)?;
                 layers.push(CpuLayer { width, height, encoder, since_key: 0 });
+                if height > 720 {
+                    preview_layer = layers.len();
+                }
                 info.push(Layer {
                     width: width as u16,
                     height: height as u16,
@@ -566,6 +610,7 @@ fn encode_loop(
         frame_no += 1;
         if cpu_turn {
             let mut picture: Option<convert::Rgb> = None;
+            let layers_len = layers.len();
             for (i, l) in layers.iter_mut().enumerate() {
                 let track = base + i;
                 // each layer from the one above (cheaper than from the screen)
@@ -577,6 +622,10 @@ fn encode_loop(
                     l.encoder.force_intra_frame();
                 }
                 let yuv = YUVBuffer::from_vec(rgb.to_i420(), l.width, l.height);
+                if i == preview_layer.min(layers_len - 1) && last_preview.elapsed() >= PREVIEW_EVERY && previewing() {
+                    last_preview = Instant::now();
+                    show_preview(&rgb);
+                }
                 picture = Some(rgb);
                 let bits = l.encoder.encode(&yuv).context("encoding the screen")?;
                 let keyframe = matches!(bits.frame_type(), FrameType::IDR | FrameType::I);
@@ -590,6 +639,17 @@ fn encode_loop(
                     return Ok(());
                 }
             }
+        }
+        // everything on the card: the preview needs its own small copy
+        if layers.is_empty()
+            && is_fresh
+            && let Some(t) = &top
+            && last_preview.elapsed() >= PREVIEW_EVERY
+            && previewing()
+        {
+            last_preview = Instant::now();
+            let (w, h) = if t.height > 720 { ((t.width * 720 / t.height) & !1, 720) } else { (t.width, t.height) };
+            show_preview(&convert::Rgb::from_raw(frame, w, h));
         }
         // keep to the frame rate
         next += frame_time;

@@ -52,12 +52,18 @@ pub struct Feed {
     volume: f32,
     pub muted: bool,
     pub slider: Entity<SliderState>,
+    /// Our own share, previewed from the encoder instead of the server.
+    pub own: bool,
 }
 
 impl Feed {
-    fn new(net: Handle, con: ConId, client: u16, name: String, info: StreamInfo, cx: &mut Context<Self>) -> Self {
+    fn new(net: Handle, con: ConId, client: u16, name: String, info: StreamInfo, own: bool, cx: &mut Context<Self>) -> Self {
         cx.on_release(|f: &mut Self, _| {
-            f.net.send(Cmd::Watch { con: f.con, client: f.client, screen: None, quality: Quality::Auto });
+            if f.own {
+                f.screen.end();
+            } else {
+                f.net.send(Cmd::Watch { con: f.con, client: f.client, screen: None, quality: Quality::Auto });
+            }
         })
         .detach();
         let (screen, _) = Screen::new();
@@ -85,6 +91,7 @@ impl Feed {
             volume: 1.0,
             muted: false,
             slider,
+            own,
         };
         f.watch(cx);
         f
@@ -95,11 +102,13 @@ impl Feed {
     }
 
     fn watch(&mut self, cx: &mut Context<Self>) {
-        let (screen, mut changed) = Screen::new();
+        let (screen, mut changed) = if self.own { crate::video::preview() } else { Screen::new() };
         self.screen = screen.clone();
         self.ended = false;
         self.sent = self.quality();
-        self.net.send(Cmd::Watch { con: self.con, client: self.client, screen: Some(screen), quality: self.sent });
+        if !self.own {
+            self.net.send(Cmd::Watch { con: self.con, client: self.client, screen: Some(screen), quality: self.sent });
+        }
         cx.spawn(async move |this, cx| {
             while changed.next().await.is_some() {
                 if this.update(cx, |f, cx| f.refresh(cx)).is_err() {
@@ -169,7 +178,7 @@ impl Feed {
 
     fn apply(&mut self, cx: &mut Context<Self>) {
         let q = self.quality();
-        if q != self.sent && !self.ended {
+        if q != self.sent && !self.ended && !self.own {
             self.sent = q;
             self.net.send(Cmd::WatchQuality { con: self.con, client: self.client, quality: q });
         }
@@ -178,6 +187,10 @@ impl Feed {
 
     /// "1080p" for the layer we get.
     pub fn showing(&self) -> Option<String> {
+        if self.own {
+            let top = self.info.as_ref()?.layers.first()?;
+            return Some(format!("Sending {}p{}", top.height, top.fps));
+        }
         let layer = self.info.as_ref()?.layers.get(self.screen.layer()? as usize)?;
         Some(format!("{}p", layer.height))
     }
@@ -192,6 +205,8 @@ impl Feed {
             (Some(image), false) => img(image.clone()).size_full().object_fit(ObjectFit::Contain).into_any_element(),
             (_, ended) => {
                 let text = match ended {
+                    true if self.own => "You stopped sharing".to_string(),
+                    false if self.own => "Starting the preview...".to_string(),
                     true if self.info.is_some() && self.reachable => "The stream ended".to_string(),
                     true => format!("{} stopped sharing", self.name),
                     false => format!("Waiting for {}'s screen...", self.name),
@@ -230,24 +245,22 @@ impl Model {
     /// streams in our channel while the main window is open, plus whatever
     /// is on the stage or in its own window.
     pub fn sync_feeds(&mut self, cx: &mut Context<Self>) {
-        let mut wanted: HashMap<FeedKey, (String, StreamInfo)> = HashMap::new();
+        let mut wanted: HashMap<FeedKey, (String, StreamInfo, bool)> = HashMap::new();
         if self.main_window.is_some()
             && let Some(s) = self.snap.active_server()
         {
             for (id, name, info, me) in streams_here(s) {
-                if !me {
-                    wanted.insert((s.con, id), (name, info));
-                }
+                wanted.insert((s.con, id), (name, info, me));
             }
         }
         let big: Vec<FeedKey> = self.screen_windows.keys().copied().chain(self.staged).collect();
         // feeds for big views stay (showing "stopped sharing") until closed
         self.feeds.retain(|k, _| wanted.contains_key(k) || big.contains(k));
-        for (key, (name, info)) in &wanted {
+        for (key, (name, info, own)) in &wanted {
             if !self.feeds.contains_key(key) {
                 let net = self.net.clone();
-                let (name, info) = (name.clone(), info.clone());
-                let feed = cx.new(|cx| Feed::new(net, key.0, key.1, name, info, cx));
+                let (name, info, own) = (name.clone(), info.clone(), *own);
+                let feed = cx.new(|cx| Feed::new(net, key.0, key.1, name, info, own, cx));
                 self.feeds.insert(*key, feed);
             }
         }
@@ -278,10 +291,11 @@ impl Model {
         if let Some(f) = self.feeds.get(&key) {
             return Some(f.clone());
         }
-        let info = self.snap.server(key.0).and_then(|s| find(s, key.1)).and_then(|(c, _)| c.stream.clone())?;
+        let row = self.snap.server(key.0).and_then(|s| find(s, key.1)).map(|(c, _)| c.clone())?;
+        let (info, own) = (row.stream.clone()?, row.me);
         let net = self.net.clone();
         let name = name.to_string();
-        let feed = cx.new(|cx| Feed::new(net, key.0, key.1, name, info, cx));
+        let feed = cx.new(|cx| Feed::new(net, key.0, key.1, name, info, own, cx));
         self.feeds.insert(key, feed.clone());
         Some(feed)
     }
@@ -299,8 +313,11 @@ impl Model {
 }
 
 /// Quality picks for a stream: Auto, then each layer.
-pub fn quality_picker(feed: &Entity<Feed>, cx: &App) -> impl IntoElement {
+pub fn quality_picker(feed: &Entity<Feed>, cx: &App) -> Option<impl IntoElement> {
     let f = feed.read(cx);
+    if f.own {
+        return None;
+    }
     let mut choices = vec![(Quality::Auto, "Auto".to_string())];
     if let Some(info) = &f.info {
         for (i, l) in info.layers.iter().enumerate() {
@@ -308,17 +325,18 @@ pub fn quality_picker(feed: &Entity<Feed>, cx: &App) -> impl IntoElement {
         }
     }
     let current = f.choice;
-    h_flex().gap_1().children(choices.into_iter().enumerate().map(|(i, (q, text))| {
+    Some(h_flex().gap_1().children(choices.into_iter().enumerate().map(|(i, (q, text))| {
         let feed = feed.clone();
         chip(SharedString::from(format!("q-{i}")), text, q == current)
             .on_click(move |_, _, cx| feed.update(cx, |f, cx| f.set_choice(q, cx)))
-    }))
+    })))
 }
 
 /// Mute button and volume slider, for streams with sound.
 pub fn sound_controls(feed: &Entity<Feed>, cx: &App) -> Option<impl IntoElement> {
     let f = feed.read(cx);
-    if !f.info.as_ref().is_some_and(|i| i.audio) {
+    // our own sound isn't played back to us
+    if f.own || !f.info.as_ref().is_some_and(|i| i.audio) {
         return None;
     }
     let muted = f.muted;
@@ -366,7 +384,7 @@ pub fn stage(model: &Entity<Model>, feed: &Entity<Feed>, cx: &App) -> impl IntoE
                 .child(div().text_xs().text_color(rgb(colors().muted)).child(status_line(f)))
                 .child(div().flex_1())
                 .children(sound_controls(feed, cx))
-                .child(quality_picker(feed, cx))
+                .children(quality_picker(feed, cx))
                 .child(
                     tool_button("pop-out", "external-link", "Open in its own window").on_click(move |_, _, cx| {
                         let (con, client, name) = key_name(&m1, key, cx);
@@ -420,7 +438,7 @@ pub fn bar(model: &Entity<Model>, s: &ServerSnap, everyone: bool, on_toggle: imp
         let staged = m.staged == Some(key);
         let model = model.clone();
         let body = match m.feeds.get(&key) {
-            Some(feed) if !me => feed.read(cx).picture(),
+            Some(feed) => feed.read(cx).picture(),
             _ => div()
                 .size_full()
                 .flex()
@@ -439,10 +457,8 @@ pub fn bar(model: &Entity<Model>, s: &ServerSnap, everyone: bool, on_toggle: imp
                 .flex_none()
                 .gap_1()
                 .cursor_pointer()
-                .when(!me, |d| {
-                    d.on_click(move |_, _, cx| {
-                        model.update(cx, |m, cx| m.stage(if staged { None } else { Some(key) }, cx));
-                    })
+                .on_click(move |_, _, cx| {
+                    model.update(cx, |m, cx| m.stage(if staged { None } else { Some(key) }, cx));
                 })
                 .child(
                     div()
