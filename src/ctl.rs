@@ -41,6 +41,8 @@ pub enum UiRequest {
     Link(String),
     /// Watch the screen of this client (con, client id, name), in its own window or on the stage.
     Watch(crate::net::ConId, u16, String, bool),
+    /// Mute the streams we watch, or unmute them.
+    ToggleStreamSound,
     Quit,
 }
 
@@ -243,7 +245,13 @@ async fn handle(line: &str, cmds: &mpsc::UnboundedSender<Cmd>) -> Value {
         }
         "share" => match snap.active_server() {
             Some(s) if s.screens => {
-                let start = (!matches!(arg, "off" | "stop")).then(|| crate::video::ShareStart {
+                let sharing = s.channels.iter().flat_map(|c| &c.clients).any(|c| c.me && c.stream.is_some());
+                let on = match arg {
+                    "off" | "stop" => false,
+                    "toggle" => !sharing,
+                    _ => true,
+                };
+                let start = on.then(|| crate::video::ShareStart {
                     source: None,
                     options: crate::config::Settings::load().share_options(),
                 });
@@ -253,6 +261,10 @@ async fn handle(line: &str, cmds: &mpsc::UnboundedSender<Cmd>) -> Value {
             Some(_) => json!({"ok": false, "error": "this server can't do screen sharing"}),
             None => json!({"ok": false, "error": "not connected"}),
         },
+        "stream-sound" => {
+            ui(UiRequest::ToggleStreamSound);
+            ok
+        }
         "watch" => {
             let (name, window) = match arg.strip_suffix(" window") {
                 Some(name) => (name.trim(), true),
@@ -435,7 +447,8 @@ usage: wisp [command]
   mute [on|off]             toggle or set mic mute
   away [message] | away off set or clear away on every server
   record [on|off]           record what you hear and say to ~/Music/Wisp
-  share [on|off]            share your screen (Banshee servers)
+  share [on|off|toggle]     share your screen (Banshee servers)
+  stream-sound              mute or unmute the streams you watch
   watch <name> [window]     watch someone's shared screen (in its own window)
   offline <name|uid> <text> leave an offline message
   query <list> [arg]        server lists as JSON: permissions, bans, keys,

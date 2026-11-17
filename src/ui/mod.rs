@@ -184,6 +184,7 @@ pub fn start(
                     m.update(cx, |m, cx| m.stage(Some((con, client)), cx));
                     open_main(&m, cx);
                 }
+                UiRequest::ToggleStreamSound => m.update(cx, |m, cx| m.toggle_stream_sound(cx)),
                 UiRequest::Quit => quit(&m, cx),
             });
         }

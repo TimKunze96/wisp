@@ -300,6 +300,19 @@ impl Model {
         Some(feed)
     }
 
+    /// Mute every stream we watch, or unmute them all if they're all muted.
+    pub fn toggle_stream_sound(&mut self, cx: &mut Context<Self>) {
+        let feeds: Vec<_> = self.feeds.values().filter(|f| !f.read(cx).own).cloned().collect();
+        let mute = feeds.iter().any(|f| !f.read(cx).muted);
+        for f in feeds {
+            f.update(cx, |f, cx| {
+                if f.muted != mute {
+                    f.toggle_mute(cx);
+                }
+            });
+        }
+    }
+
     /// Show this stream on the stage (None: back to the channel tree).
     pub fn stage(&mut self, key: Option<FeedKey>, cx: &mut Context<Self>) {
         if let Some(k) = key {
