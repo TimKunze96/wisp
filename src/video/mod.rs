@@ -565,6 +565,10 @@ fn encode_loop(
     // the preview comes from the CPU layer closest to 720p
     let mut preview_layer = 0;
     let mut last_preview = Instant::now() - PREVIEW_EVERY;
+    // someone waits for a keyframe on the card's layer: it only makes one
+    // every so many frames, so it gets the last picture again until then
+    // (a still screen brings no new ones)
+    let gpu_key = Arc::new(AtomicBool::new(false));
     while !stop.load(Ordering::Relaxed) && !out.is_closed() {
         // a new source: the old one closes as it's dropped; its size gets
         // letterboxed into the layers like any other size change
@@ -575,16 +579,21 @@ fn encode_loop(
                 k.store(true, Ordering::Relaxed);
             }
         }
-        let fresh = match source.latest.take(Duration::from_millis(200)) {
+        let wait = if gpu_key.load(Ordering::Relaxed) { frame_time } else { Duration::from_millis(200) };
+        let fresh = match source.latest.take(wait) {
             Ok(f) => f,
             Err(()) => break,
         };
         let want: Vec<bool> = keyframes.iter().map(|k| k.swap(false, Ordering::Relaxed)).collect();
+        if top.is_some() && want[0] {
+            gpu_key.store(true, Ordering::Relaxed);
+        }
+        let repeat_for_gpu = gpu_key.load(Ordering::Relaxed);
         // a still screen sends nothing, unless someone needs a keyframe
         let is_fresh = fresh.is_some();
         let frame = match fresh {
             Some(f) => last.insert(f),
-            None if !want.contains(&true) => continue,
+            None if !want.contains(&true) && !repeat_for_gpu => continue,
             None => match last.as_mut() {
                 Some(f) => f,
                 None => {
@@ -628,12 +637,16 @@ fn encode_loop(
         }
         // the card takes every new frame; it keeps its own keyframe rhythm
         if let Some(t) = &mut top
-            && is_fresh
+            && (is_fresh || repeat_for_gpu)
         {
             let input = (frame.width, frame.height, frame.order);
             if t.encoder.as_ref().is_none_or(|e| e.input != input) {
                 let out = out.clone();
+                let gpu_key = gpu_key.clone();
                 let packets = move |keyframe, data| {
+                    if keyframe {
+                        gpu_key.store(false, Ordering::Relaxed);
+                    }
                     let _ = out.blocking_send(ShareMsg::Packet(Packet { track: 0, keyframe, data }));
                 };
                 let rate = gpu_bitrate(t.width, t.height, fps);
