@@ -779,7 +779,15 @@ impl MainView {
                 }
             }
         }
-        div().id("tree").flex_1().overflow_y_scroll().child(col)
+        // the empty space below: right-click for a new top-level channel
+        let view = cx.entity().downgrade();
+        let con = s.con;
+        let below = div()
+            .id("tree-below")
+            .flex_grow(1.)
+            .min_h(px(120.))
+            .context_menu(move |menu, _, _| super::menus::tree_menu(menu, con, &view));
+        v_flex().id("tree").flex_1().overflow_y_scroll().child(col).child(below)
     }
 
     /// The rows the tree shows, in order (collapsed channels and the filter
@@ -1622,8 +1630,8 @@ impl MainView {
     }
 }
 
-impl Render for MainView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+impl MainView {
+    fn content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let audio_error = self.model.read(cx).snap.audio_error.clone();
         let hint = self.chat_placeholder(cx);
         if hint != self.chat_hint {
@@ -1667,5 +1675,19 @@ impl Render for MainView {
             .child(self.right(window, cx))
             .when_some(overlay, |d, o| d.child(o))
             .when_some(editor, |d, e| d.child(e))
+    }
+}
+
+impl Render for MainView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let title = {
+            let snap = &self.model.read(cx).snap;
+            match snap.active_server().map(|s| if s.server_name.is_empty() { s.label.clone() } else { s.server_name.clone() }) {
+                Some(name) if !name.is_empty() => format!("Wisp · {name}"),
+                _ => "Wisp".to_string(),
+            }
+        };
+        let content = self.content(window, cx).into_any_element();
+        super::frame::framed(title, content, window, cx)
     }
 }

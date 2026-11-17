@@ -29,8 +29,8 @@ impl ScreenView {
     }
 }
 
-impl Render for ScreenView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+impl ScreenView {
+    fn content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let f = self.feed.read(cx);
         let key = (f.con, f.client);
         let model = self.model.clone();
@@ -85,3 +85,11 @@ impl Render for ScreenView {
 }
 
 use gpui_kit::prelude::FluentBuilder;
+
+impl Render for ScreenView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let title = format!("{} · screen", self.feed.read(cx).name);
+        let content = self.content(window, cx).into_any_element();
+        super::frame::framed(title, content, window, cx)
+    }
+}

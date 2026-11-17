@@ -546,6 +546,14 @@ pub fn user_menu(
     }))
 }
 
+/// Right-click below the channels: a channel at the top level.
+pub fn tree_menu(menu: PopupMenu, con: ConId, view: &WeakEntity<MainView>) -> PopupMenu {
+    let view = view.clone();
+    menu.min_w(px(MENU_WIDTH)).item(row("plus", "Create channel...", colors().muted).on_click(move |_, w, cx| {
+        let _ = view.update(cx, |v, cx| v.open_channel_editor(con, None, 0, String::new(), w, cx));
+    }))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn channel_menu(
     menu: PopupMenu,
@@ -599,6 +607,22 @@ pub fn channel_menu(
         move |_, _, cx| super::open_admin(&m, con, super::AdminTab::Perms(PermTarget::Channel(id), title.clone()), cx)
     }))
     .item(row("folder-plus", "Create sub-channel...", colors().muted).on_click(editor(None)))
+    .item(row("plus", "Create channel next to it...", colors().muted).on_click({
+        let (view, parent) = (view.clone(), ch.parent);
+        let parent_name = model
+            .read(cx)
+            .snap
+            .servers
+            .iter()
+            .find(|s| s.con == con)
+            .and_then(|s| s.channels.iter().find(|c| c.id == parent))
+            .map(|c| c.name.clone())
+            .unwrap_or_default();
+        move |_, w, cx| {
+            let parent_name = parent_name.clone();
+            let _ = view.update(cx, |v, cx| v.open_channel_editor(con, None, parent, parent_name, w, cx));
+        }
+    }))
     .item(row("pencil", "Rename...", colors().muted).on_click(ask(PromptKind::RenameChannel, name.clone())))
     .item(row("text-quote", "Set topic...", colors().muted).on_click(ask(PromptKind::SetTopic, topic)))
     .item(

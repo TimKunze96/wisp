@@ -1600,8 +1600,8 @@ fn setting_row(text: impl Into<SharedString>, el: impl IntoElement) -> impl Into
         .child(div().flex_1().child(el))
 }
 
-impl Render for SettingsView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+impl SettingsView {
+    fn content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body = match self.tab {
             SettingsTab::Audio => self.audio(cx),
             SettingsTab::Servers => self.servers(cx),
@@ -1627,5 +1627,13 @@ impl Render for SettingsView {
                     .child(header_row().child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(self.tab.title())))
                     .child(div().id("settings-body").flex_1().overflow_y_scroll().px_6().py_5().child(body)),
             )
+    }
+}
+
+impl Render for SettingsView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let title = "Settings";
+        let content = self.content(window, cx).into_any_element();
+        super::frame::framed(title, content, window, cx)
     }
 }

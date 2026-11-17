@@ -1638,8 +1638,8 @@ impl AdminView {
     }
 }
 
-impl Render for AdminView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+impl AdminView {
+    fn content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let connected = self.server(cx).is_some();
         let body = if !connected {
             label("Not connected to this server anymore.").into_any_element()
@@ -1690,5 +1690,16 @@ impl Render for AdminView {
                             ),
                     ),
             )
+    }
+}
+
+impl Render for AdminView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let title = match self.server(cx) {
+            Some(s) if !s.server_name.is_empty() => format!("Server admin · {}", s.server_name),
+            _ => "Server admin".to_string(),
+        };
+        let content = self.content(window, cx).into_any_element();
+        super::frame::framed(title, content, window, cx)
     }
 }

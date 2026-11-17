@@ -3,6 +3,7 @@
 mod admin;
 mod bbcode;
 mod files_view;
+mod frame;
 mod icons;
 mod palette;
 mod screen_view;
@@ -21,7 +22,7 @@ mod widgets;
 use futures::StreamExt;
 use futures::channel::mpsc::UnboundedReceiver;
 use gpui_kit::{
-    AnyWindowHandle, App, AppContext, Bounds, Context, Entity, WindowBounds, WindowOptions, px, size,
+    AnyWindowHandle, App, AppContext, Bounds, Context, Entity, px, size,
 };
 
 use crate::config::Settings;
@@ -285,18 +286,14 @@ pub fn open_main(model: &Entity<Model>, cx: &mut App) {
             return;
         }
     }
-    let options = WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-            None,
-            {
-                let (w, h) = model.read(cx).settings.window_size.unwrap_or((1100., 760.));
-                size(px(w.max(640.)), px(h.max(420.)))
-            },
-            cx,
-        ))),
-        app_id: Some("wisp".into()),
-        ..Default::default()
-    };
+    let options = frame::window_options(Bounds::centered(
+        None,
+        {
+            let (w, h) = model.read(cx).settings.window_size.unwrap_or((1100., 760.));
+            size(px(w.max(640.)), px(h.max(420.)))
+        },
+        cx,
+    ));
     let m = model.clone();
     if let Ok((handle, _)) =
         gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| main_view::MainView::new(m, window, cx)))
@@ -327,11 +324,7 @@ pub fn open_admin(model: &Entity<Model>, con: ConId, tab: AdminTab, cx: &mut App
             let _ = w.update(cx, |_, window, _| window.remove_window());
         }
     }
-    let options = WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(1000.), px(720.)), cx))),
-        app_id: Some("wisp".into()),
-        ..Default::default()
-    };
+    let options = frame::window_options(Bounds::centered(None, size(px(1000.), px(720.)), cx));
     let m = model.clone();
     if let Ok((handle, view)) =
         gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| admin::AdminView::new(m, con, tab, window, cx)))
@@ -358,11 +351,7 @@ pub fn open_screen(model: &Entity<Model>, con: ConId, client: u16, name: String,
         m.open_feed(key, &name, cx)
     });
     let Some(feed) = feed else { return };
-    let options = WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(1280.), px(800.)), cx))),
-        app_id: Some("wisp".into()),
-        ..Default::default()
-    };
+    let options = frame::window_options(Bounds::centered(None, size(px(1280.), px(800.)), cx));
     let m = model.clone();
     if let Ok((handle, _)) =
         gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| screen_view::ScreenView::new(m, feed, window, cx)))
@@ -388,11 +377,7 @@ pub fn open_settings(model: &Entity<Model>, tab: SettingsTab, cx: &mut App) {
             return;
         }
     }
-    let options = WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(900.), px(640.)), cx))),
-        app_id: Some("wisp".into()),
-        ..Default::default()
-    };
+    let options = frame::window_options(Bounds::centered(None, size(px(900.), px(640.)), cx));
     let m = model.clone();
     if let Ok((handle, view)) = gpui_kit::open_window(options, cx, |window, cx| {
         cx.new(|cx| settings::SettingsView::new(m, tab, window, cx))
