@@ -2,7 +2,7 @@
 //! with minimize, maximize and close on Windows, and on Linux desktops that
 //! leave decorations to the app (GNOME, KDE). Tiling compositors get none.
 
-use gpui_kit::component::{TitleBar, h_flex, v_flex, window_border};
+use gpui_kit::component::{TitleBar, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
     AnyElement, App, Bounds, Decorations, IntoElement, ParentElement, Pixels, SharedString, Styled, Window,
@@ -40,7 +40,9 @@ fn has_title_bar(window: &Window) -> bool {
 /// `content` under a title bar saying `title`, in the window's frame.
 pub fn framed(title: impl Into<SharedString>, content: impl IntoElement, window: &mut Window, _cx: &mut App) -> AnyElement {
     let bar = has_title_bar(window);
-    let body = v_flex()
+    // no window_border here: gpui-kit's Root already draws the Linux border
+    // and shadow, and a second one shows up as a frame around the window
+    v_flex()
         .size_full()
         .font_family(FONT)
         .text_color(rgb(colors().text))
@@ -57,10 +59,6 @@ pub fn framed(title: impl Into<SharedString>, content: impl IntoElement, window:
                 ),
             )
         })
-        .child(div().flex_1().min_h_0().w_full().flex().child(content));
-    if cfg!(target_os = "linux") && bar {
-        window_border().child(body).into_any_element()
-    } else {
-        body.into_any_element()
-    }
+        .child(div().flex_1().min_h_0().w_full().flex().child(content))
+        .into_any_element()
 }
