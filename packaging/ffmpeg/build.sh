@@ -90,4 +90,9 @@ case "$exe" in
     *.exe) x86_64-w64-mingw32-strip "$exe"; cp "$exe" "$OUT/wisp-ffmpeg.exe" ;;
     *) strip "$exe" 2>/dev/null || strip -x "$exe"; cp "$exe" "$OUT/wisp-ffmpeg" ;;
 esac
+# macOS: an app can only be signed when the code inside it is; only arm64
+# links come out signed on their own
+case "$TARGET" in
+    *-apple-darwin) codesign --force --sign - --options runtime "$OUT/wisp-ffmpeg" ;;
+esac
 ls -l "$OUT"
