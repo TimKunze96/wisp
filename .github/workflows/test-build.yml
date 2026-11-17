@@ -1,0 +1,74 @@
+name: Test build
+
+# Installers for trying a pull request before it's merged. Add the
+# "test build" label; every push afterwards builds again. The files land in
+# the run's artifacts only, never in a release, so nobody updates to them.
+on:
+  pull_request:
+    types: [labeled, synchronize]
+
+concurrency:
+  group: test-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+
+jobs:
+  build:
+    if: contains(github.event.pull_request.labels.*.name, 'test build')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            formats: dmg
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+            formats: dmg
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            formats: appimage
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            formats: nsis
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies (Ubuntu only)
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc g++ clang cmake pkg-config libasound2-dev libfontconfig-dev \
+            libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libssl-dev libzstd-dev libvulkan1 libpipewire-0.3-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --locked
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package
+        shell: bash
+        run: |
+          cargo packager --release --target ${{ matrix.target }} \
+            --formats ${{ matrix.formats }} --out-dir dist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wisp-${{ matrix.target }}
+          path: |
+            dist/*.dmg
+            dist/*.AppImage
+            dist/*-setup.exe
+          retention-days: 14
