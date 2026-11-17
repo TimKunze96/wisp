@@ -40,6 +40,8 @@ pub struct MainView {
     pub(super) model: Entity<Model>,
     pub(super) prompt: Option<Prompt>,
     pub(super) share: Option<super::share_dialog::ShareDialog>,
+    /// The keyboard shortcut overview is open.
+    pub(super) shortcuts: bool,
     pub(super) chat: Entity<InputState>,
     /// Volume slider of the selected user, with their uid.
     volume: Option<(String, Entity<SliderState>)>,
@@ -234,6 +236,7 @@ impl MainView {
             model,
             prompt: None,
             share: None,
+            shortcuts: false,
             chat,
             volume: None,
             editor: None,
@@ -266,6 +269,13 @@ impl MainView {
             cx.stop_propagation();
             return;
         }
+        // "?" only while not typing somewhere
+        if k.key == "f1" || (k.key_char.as_deref() == Some("?") && self.focus.is_focused(window)) {
+            self.shortcuts = !self.shortcuts;
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
         if self.focus.is_focused(window)
             && !k.modifiers.modified()
             && matches!(k.key.as_str(), "up" | "down" | "left" | "right" | "enter")
@@ -275,7 +285,8 @@ impl MainView {
             return;
         }
         if k.key == "escape" {
-            if self.palette.take().is_some() {
+            if std::mem::take(&mut self.shortcuts) {
+            } else if self.palette.take().is_some() {
             } else if self.prompt.take().is_some() {
             } else if self.editor.take().is_some() {
             } else if self.share.take().is_some() {
@@ -1654,7 +1665,7 @@ impl MainView {
         if self.drop_hint.is_some() && !cx.has_active_drag() {
             self.drop_hint = None;
         }
-        let overlay = self.prompt_overlay(cx).or_else(|| self.share_overlay(cx)).or_else(|| self.host_message(cx)).or_else(|| self.palette_overlay(cx));
+        let overlay = self.shortcuts_overlay(cx).or_else(|| self.prompt_overlay(cx)).or_else(|| self.share_overlay(cx)).or_else(|| self.host_message(cx)).or_else(|| self.palette_overlay(cx));
         let editor = self.editor.clone().map(|e| {
             div()
                 .absolute()
