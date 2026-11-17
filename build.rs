@@ -8,4 +8,9 @@ fn main() {
         res.set_icon("assets/icons/wisp.ico").set("ProductName", "Wisp").set("FileDescription", "Wisp");
         res.compile().expect("Windows resources");
     }
+    // ScreenCaptureKit's Swift bridge needs the system's Swift runtime; the
+    // crate's own link flag only reaches the crate, not our binary
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
+    }
 }

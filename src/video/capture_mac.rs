@@ -101,6 +101,8 @@ fn ask() -> Result<(SCContentFilter, (u32, u32), Option<u32>)> {
         SCContentSharingPickerMode::SingleWindow,
         SCContentSharingPickerMode::SingleApplication,
     ]);
+    // sharing Wisp itself only shows the share inside the share
+    let _ = config.set_excluded_bundle_ids(&["at.timkunze.wisp"]);
     let (tx, rx) = std::sync::mpsc::channel();
     SCContentSharingPicker::show(&config, move |outcome| {
         let _ = tx.send(outcome);
@@ -112,6 +114,14 @@ fn ask() -> Result<(SCContentFilter, (u32, u32), Option<u32>)> {
                 _ => None,
             };
             let (w, h) = r.pixel_size();
+            tracing::info!(
+                "picked {:?}: {w}x{h} at {:?}, {} displays, {} windows, {} apps",
+                r.source(),
+                r.rect(),
+                r.displays().len(),
+                r.windows().len(),
+                r.applications().len()
+            );
             if w == 0 || h == 0 {
                 bail!("nothing was picked to share");
             }
