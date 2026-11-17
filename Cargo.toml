@@ -74,7 +74,8 @@ publisher = "Tim Kunze"
 homepage = "https://github.com/TimKunze96/wisp"
 license-file = "LICENSE"
 category = "SocialNetworking"
-binaries = [{ path = "wisp", main = true }]
+# wisp-ffmpeg: built by packaging/ffmpeg/build.sh into the target folder
+binaries = [{ path = "wisp", main = true }, { path = "wisp-ffmpeg" }]
 icons = [
     "assets/icons/32x32.png",
     "assets/icons/128x128.png",
@@ -92,12 +93,12 @@ minimum-system-version = "12.3"
 info-plist-path = "packaging/macos/Info.plist"
 
 [package.metadata.packager.appimage]
-# the system's own, which talks to its PipeWire daemon
-excluded-libs = ["libpipewire*"]
+# the system's own: they talk to its PipeWire daemon and graphics drivers
+excluded-libs = ["libpipewire*", "libva*", "libdrm*"]
 
 [package.metadata.packager.deb]
 # libvulkan1 is loaded at runtime, the rest is linked
-depends = ["libxcb1", "libxkbcommon0", "libxkbcommon-x11-0", "libasound2", "libpipewire-0.3-0", "libvulkan1"]
+depends = ["libxcb1", "libxkbcommon0", "libxkbcommon-x11-0", "libasound2", "libpipewire-0.3-0", "libvulkan1", "libva2", "libva-drm2"]
 
 [package.metadata.packager.nsis]
 installer-icon = "assets/icons/wisp.ico"

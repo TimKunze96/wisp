@@ -11,7 +11,12 @@ env:
   CMAKE_POLICY_VERSION_MINIMUM: "3.5"
 
 jobs:
+  ffmpeg:
+    if: contains(github.event.pull_request.labels.*.name, 'test build')
+    uses: ./.github/workflows/ffmpeg.yml
+
   build:
+    needs: ffmpeg
     if: contains(github.event.pull_request.labels.*.name, 'test build')
     # on the job, so a skipped run (push and label at once) doesn't cancel a real one
     concurrency:
@@ -61,9 +66,16 @@ jobs:
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
+      - name: Bundle ffmpeg
+        uses: actions/download-artifact@v8
+        with:
+          name: ffmpeg-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release
+
       - name: Package
         shell: bash
         run: |
+          chmod +x target/${{ matrix.target }}/release/wisp-ffmpeg* || true
           cargo packager --release --target ${{ matrix.target }} \
             --formats ${{ matrix.formats }} --out-dir dist
 

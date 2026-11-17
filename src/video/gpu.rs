@@ -43,15 +43,28 @@ impl Gpu {
     }
 }
 
-/// The ffmpeg next to Wisp's config or on the PATH.
+/// The ffmpeg Wisp ships (`wisp-ffmpeg` next to the executable), else one
+/// in the config folder or on the PATH (macOS apps don't see Homebrew's).
 pub(super) fn ffmpeg() -> Option<PathBuf> {
-    let exe = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
-    let local = crate::config::config_dir().join(exe);
-    if local.is_file() {
-        return Some(local);
-    }
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path).map(|d| d.join(exe)).find(|p| p.is_file())
+    static FOUND: OnceLock<Option<PathBuf>> = OnceLock::new();
+    FOUND
+        .get_or_init(|| {
+            let suffix = std::env::consts::EXE_SUFFIX;
+            let bundled = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.join(format!("wisp-ffmpeg{suffix}"))));
+            let local = crate::config::config_dir().join(format!("ffmpeg{suffix}"));
+            let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+            if cfg!(target_os = "macos") {
+                dirs.extend(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from));
+            }
+            let found = bundled
+                .into_iter()
+                .chain([local])
+                .chain(dirs.into_iter().map(|d| d.join(format!("ffmpeg{suffix}"))))
+                .find(|p| p.is_file());
+            tracing::info!("ffmpeg: {}", found.as_ref().map_or("none".into(), |p| p.display().to_string()));
+            found
+        })
+        .clone()
 }
 
 /// The first GPU encoder that really works here, found once (each try is a

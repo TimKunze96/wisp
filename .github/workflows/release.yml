@@ -12,7 +12,11 @@ env:
   CMAKE_POLICY_VERSION_MINIMUM: "3.5"
 
 jobs:
+  ffmpeg:
+    uses: ./.github/workflows/ffmpeg.yml
+
   publish:
+    needs: ffmpeg
     permissions:
       contents: write
     strategy:
@@ -64,9 +68,16 @@ jobs:
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
+      - name: Bundle ffmpeg
+        uses: actions/download-artifact@v8
+        with:
+          name: ffmpeg-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release
+
       - name: Package
         shell: bash
         run: |
+          chmod +x target/${{ matrix.target }}/release/wisp-ffmpeg* || true
           cargo packager --release --target ${{ matrix.target }} \
             --formats ${{ matrix.formats }} --out-dir dist
 
@@ -92,6 +103,8 @@ jobs:
             linux-*) gzip -9 -c dist/*.AppImage > "update/$name.AppImage.gz" ;;
             windows-*)
               gzip -9 -c "target/${{ matrix.target }}/release/wisp.exe" > "update/$name.exe.gz"
+              # the updater only swaps wisp.exe; Wisp fetches this when it's missing
+              gzip -9 -c "target/${{ matrix.target }}/release/wisp-ffmpeg.exe" > "update/$name-ffmpeg.exe.gz"
               ;;
           esac
 
@@ -146,7 +159,8 @@ jobs:
             --argjson macos_x86_64 "$(entry macos-x86_64)" \
             --argjson linux_x86_64 "$(entry linux-x86_64)" \
             --argjson windows_x86_64 "$(entry windows-x86_64)" \
-            '{$version, files: {"macos-aarch64": $macos_aarch64, "macos-x86_64": $macos_x86_64, "linux-x86_64": $linux_x86_64, "windows-x86_64": $windows_x86_64}}' \
+            --argjson windows_x86_64_ffmpeg "$(entry windows-x86_64-ffmpeg)" \
+            '{$version, files: {"macos-aarch64": $macos_aarch64, "macos-x86_64": $macos_x86_64, "linux-x86_64": $linux_x86_64, "windows-x86_64": $windows_x86_64, "windows-x86_64-ffmpeg": $windows_x86_64_ffmpeg}}' \
             > latest.json
           cat latest.json
           umask 077

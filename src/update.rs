@@ -191,7 +191,14 @@ fn parse(manifest: &[u8]) -> Result<Release, String> {
         .filter(|v| !v.is_empty())
         .ok_or_else(|| bad("version"))?
         .to_string();
-    let entry = &json["files"][platform()];
+    let package = package(&json, &platform()).map_err(|e| bad(&e))?;
+    Ok(Release { version, package })
+}
+
+/// The manifest's file under `key`, if it lists one.
+fn package(json: &serde_json::Value, key: &str) -> Result<Option<Package>, String> {
+    let bad = |what: &str| what.to_string();
+    let entry = &json["files"][key];
     let package = if entry.is_null() {
         None
     } else {
@@ -212,7 +219,42 @@ fn parse(manifest: &[u8]) -> Result<Release, String> {
             .ok_or_else(|| bad("sha256"))?;
         Some(Package { name, sha256 })
     };
-    Ok(Release { version, package })
+    Ok(package)
+}
+
+/// Windows: the updater only swaps `wisp.exe`, so the ffmpeg screen sharing
+/// uses comes from the latest release when it's missing (after an update
+/// from a version without it). Checked against the signed manifest like
+/// updates.
+#[cfg(windows)]
+pub async fn ensure_ffmpeg() -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let dir = exe.parent().ok_or("no install folder")?;
+    let path = dir.join("wisp-ffmpeg.exe");
+    if path.exists() {
+        return Ok(());
+    }
+    let base = base_url();
+    let manifest = fetch(&format!("{base}/latest.json")).await?.ok_or("no release manifest")?;
+    let sig = fetch(&format!("{base}/latest.json.sig")).await?.ok_or("the manifest isn't signed")?;
+    verify(&manifest, &sig)?;
+    let json: serde_json::Value = serde_json::from_slice(&manifest).map_err(|e| e.to_string())?;
+    let Some(package) = package(&json, &format!("{}-ffmpeg", platform()))? else { return Ok(()) };
+    let download = dir.join("wisp-ffmpeg.exe.gz.download");
+    let url = format!("{base}/{}", package.name);
+    fetch_to(&url, &download, &package, &AtomicU8::new(0)).await?;
+    let unpacked = (|| {
+        let partial = dir.join("wisp-ffmpeg.exe.partial");
+        let mut gz = flate2::read::GzDecoder::new(File::open(&download)?);
+        let mut out = File::create(&partial)?;
+        io::copy(&mut gz, &mut out)?;
+        out.sync_all()?;
+        fs::rename(&partial, &path)
+    })();
+    let _ = fs::remove_file(&download);
+    unpacked.map_err(|e| e.to_string())?;
+    tracing::info!("downloaded the screen sharing encoder");
+    Ok(())
 }
 
 fn decode_hex(hex: &[u8]) -> Option<Vec<u8>> {

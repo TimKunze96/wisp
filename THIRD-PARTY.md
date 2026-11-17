@@ -6,6 +6,13 @@ The bundled icons are [Lucide](https://lucide.dev) (ISC), shipped with gpui-kit.
 bundled font is [Adwaita Sans](https://gitlab.gnome.org/GNOME/adwaita-fonts) (SIL OFL 1.1,
 see assets/fonts/LICENSE).
 
+Screen sharing ships `wisp-ffmpeg`, a build of [FFmpeg](https://ffmpeg.org) 7.1.1 under the
+LGPL 2.1 or later, run as a separate program. Its source is at
+https://ffmpeg.org/releases/ffmpeg-7.1.1.tar.xz and packaging/ffmpeg/build.sh is the exact
+configuration (no GPL or nonfree parts). It uses the headers of
+[nv-codec-headers](https://github.com/FFmpeg/nv-codec-headers) (MIT) and, on Windows,
+[AMF](https://github.com/GPUOpen-LibrariesAndSDKs/AMF) (MIT).
+
 | Crate | Version | License |
 |---|---|---|
 | [accesskit](https://github.com/AccessKit/accesskit) | 0.24.1 | MIT OR Apache-2.0 |

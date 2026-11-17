@@ -1,0 +1,48 @@
+name: ffmpeg
+
+# wisp-ffmpeg for every target (packaging/ffmpeg/build.sh), as artifacts
+# named ffmpeg-<target>. Cached until the script changes.
+on:
+  workflow_call:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          # cross-compiled with MinGW
+          - runner: ubuntu-22.04
+            target: x86_64-pc-windows-msvc
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+          - runner: macos-latest
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: ffmpeg-out
+          key: ffmpeg-${{ matrix.target }}-${{ hashFiles('packaging/ffmpeg/build.sh') }}
+
+      - name: Build
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get update
+            sudo apt-get install -y nasm libva-dev mingw-w64
+          else
+            brew install nasm
+          fi
+          packaging/ffmpeg/build.sh ${{ matrix.target }} ffmpeg-out
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ffmpeg-${{ matrix.target }}
+          path: ffmpeg-out/*
