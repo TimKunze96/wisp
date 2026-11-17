@@ -39,6 +39,13 @@ pub fn is_banshee(address: &str) -> bool {
     address.starts_with(SCHEME)
 }
 
+/// The domain in "host:port", which its certificate is for (None for IP
+/// addresses, which only work with a pinned fingerprint).
+fn domain(host: &str) -> Option<&str> {
+    let name = host.rsplit_once(':').map_or(host, |(h, _)| h);
+    (!name.starts_with('[') && name.parse::<std::net::IpAddr>().is_err()).then_some(name)
+}
+
 /// "banshee://host:port#fingerprint" into ("host:port", fingerprint).
 fn parse(address: &str) -> Result<(String, Option<String>)> {
     let rest = address.strip_prefix(SCHEME).context("not a banshee:// address")?;
@@ -166,7 +173,8 @@ async fn connect_and_run(
     let name = if bookmark.nickname.trim().is_empty() { "Wisp user" } else { bookmark.nickname.trim() };
     let identity = identity()?;
     let password = Some(bookmark.password.as_str()).filter(|p| !p.is_empty());
-    let opts = Options { name, identity: &identity, fingerprint: fingerprint.as_deref(), password };
+    let server_name = domain(&host);
+    let opts = Options { name, identity: &identity, fingerprint: fingerprint.as_deref(), password, server_name };
     let mut client = Client::connect(addr, opts).await?;
     let voice = client.voice();
 
@@ -1306,7 +1314,14 @@ fn channel_row(c: &Channel, depth: usize, clients: Vec<ClientRow>) -> ChannelRow
 
 #[cfg(test)]
 mod tests {
-    use super::parse;
+    use super::{domain, parse};
+
+    #[test]
+    fn domains() {
+        assert_eq!(domain("voice.example.com:7700"), Some("voice.example.com"));
+        assert_eq!(domain("1.2.3.4:9000"), None);
+        assert_eq!(domain("[::1]:7700"), None);
+    }
 
     #[test]
     fn addresses() {

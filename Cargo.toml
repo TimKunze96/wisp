@@ -38,7 +38,7 @@ sha2 = "0.10"
 crc32fast = "1"
 reqwest = { version = "0.13", default-features = false }
 openh264 = "0.9.10"
-banshee-client = { git = "https://github.com/TimKunze96/banshee", rev = "3b1b27071e40b93f84fb29ea5253a98464f78402" }
+banshee-client = { git = "https://github.com/TimKunze96/banshee", rev = "6d19e022214a3bd4be2d0d99b776916e8c9c65a5" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = { version = "0.3.6", features = ["blocking"] }
