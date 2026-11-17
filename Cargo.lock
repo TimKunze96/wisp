@@ -717,7 +717,7 @@ dependencies = [
 [[package]]
 name = "banshee-client"
 version = "0.1.0"
-source = "git+https://github.com/TimKunze96/banshee?rev=6d19e022214a3bd4be2d0d99b776916e8c9c65a5#6d19e022214a3bd4be2d0d99b776916e8c9c65a5"
+source = "git+https://github.com/TimKunze96/banshee?rev=b27b1b421e9debbb07004621590b13e7500b0919#b27b1b421e9debbb07004621590b13e7500b0919"
 dependencies = [
  "anyhow",
  "banshee-proto",
@@ -733,7 +733,7 @@ dependencies = [
 [[package]]
 name = "banshee-proto"
 version = "0.1.0"
-source = "git+https://github.com/TimKunze96/banshee?rev=6d19e022214a3bd4be2d0d99b776916e8c9c65a5#6d19e022214a3bd4be2d0d99b776916e8c9c65a5"
+source = "git+https://github.com/TimKunze96/banshee?rev=b27b1b421e9debbb07004621590b13e7500b0919#b27b1b421e9debbb07004621590b13e7500b0919"
 dependencies = [
  "postcard",
  "serde",
@@ -10692,7 +10692,7 @@ dependencies = [
 
 [[package]]
 name = "wisp"
-version = "0.5.2"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "apple-cf",

@@ -1,6 +1,6 @@
 [package]
 name = "wisp"
-version = "0.5.2"
+version = "0.6.0"
 edition = "2024"
 description = "Voice chat client for TeamSpeak 3 servers"
 license = "MIT"
@@ -38,7 +38,7 @@ sha2 = "0.10"
 crc32fast = "1"
 reqwest = { version = "0.13", default-features = false }
 openh264 = "0.9.10"
-banshee-client = { git = "https://github.com/TimKunze96/banshee", rev = "6d19e022214a3bd4be2d0d99b776916e8c9c65a5" }
+banshee-client = { git = "https://github.com/TimKunze96/banshee", rev = "b27b1b421e9debbb07004621590b13e7500b0919" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = { version = "0.3.6", features = ["blocking"] }
