@@ -44,6 +44,22 @@ const KEYFRAME_FRAMES: u32 = FPS * 10;
 /// The GPU layer can't be asked for keyframes, so it sends one this often.
 const GPU_KEYFRAME_SECS: u32 = 2;
 
+/// macOS: the sound follows the pick (a window or app brings only its own).
+pub const SOUND_FOLLOWS_PICK: bool = cfg!(target_os = "macos");
+
+/// An app playing sound right now, to share only its sound.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SoundApp {
+    /// What the capture filters on (Linux: the app name, Windows: its process id).
+    pub key: String,
+    pub name: String,
+}
+
+/// The apps playing sound right now (not Wisp). Blocks briefly.
+pub fn sound_apps() -> Vec<SoundApp> {
+    sound::apps()
+}
+
 /// Whether we can send the computer's sound along.
 pub const SOUND: bool = cfg!(any(target_os = "linux", windows, target_os = "macos"));
 
@@ -298,7 +314,12 @@ pub struct Sharing {
 
 impl Sharing {
     /// Send `source` (or, without one, the default screen) to `out` until stopped.
-    pub fn start(source: Option<Source>, options: ShareOptions, out: tokio::sync::mpsc::Sender<ShareMsg>) -> Self {
+    pub fn start(
+        source: Option<Source>,
+        options: ShareOptions,
+        sound_app: Option<String>,
+        out: tokio::sync::mpsc::Sender<ShareMsg>,
+    ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let keyframes: Arc<Keyframes> = Arc::new(Default::default());
         let next: Arc<Mutex<Option<Source>>> = Arc::default();
@@ -310,7 +331,7 @@ impl Sharing {
                     Some(s) => Ok(s),
                     None => open(Pick::Default),
                 };
-                if let Err(e) = source.and_then(|source| share(source, options, &s, &k, &n, &out)) {
+                if let Err(e) = source.and_then(|source| share(source, options, sound_app, &s, &k, &n, &out)) {
                     let _ = out.blocking_send(ShareMsg::Failed(format!("{e:#}")));
                 }
             })
@@ -338,12 +359,12 @@ impl Drop for Sharing {
 }
 
 /// The sound of the computer, if we can get it.
-fn sound(out: &tokio::sync::mpsc::Sender<ShareMsg>) -> Option<sound::Sound> {
+fn sound(out: &tokio::sync::mpsc::Sender<ShareMsg>, app: Option<String>) -> Option<sound::Sound> {
     let out = out.clone();
     let packets = move |data| {
         let _ = out.try_send(ShareMsg::Packet(Packet { track: AUDIO, keyframe: false, data }));
     };
-    match sound::Sound::start(packets) {
+    match sound::Sound::start(packets, app) {
         Ok(s) => Some(s),
         Err(e) => {
             tracing::warn!("screen share without sound: {e:#}");
@@ -355,13 +376,14 @@ fn sound(out: &tokio::sync::mpsc::Sender<ShareMsg>) -> Option<sound::Sound> {
 fn share(
     mut source: Source,
     options: ShareOptions,
+    sound_app: Option<String>,
     stop: &AtomicBool,
     keyframes: &Keyframes,
     next: &Mutex<Option<Source>>,
     out: &tokio::sync::mpsc::Sender<ShareMsg>,
 ) -> Result<()> {
     source.latest.set_fps(options.fps.clamp(1, MAX_FPS));
-    let sound = if options.sound { sound(out) } else { None };
+    let sound = if options.sound { sound(out, sound_app) } else { None };
     let result = encode_loop(options, &mut source, next, stop, keyframes, out, sound.is_some());
     end_previews();
     drop(sound);
@@ -397,6 +419,8 @@ pub fn screens() -> Vec<ScreenChoice> {
 pub struct ShareStart {
     pub source: Option<Source>,
     pub options: ShareOptions,
+    /// Only this app's sound (a `SoundApp::key`), not everything.
+    pub sound_app: Option<String>,
 }
 
 /// What a source turned out to be.
@@ -876,6 +900,13 @@ mod tests {
         assert_eq!(ladder(3440, 1440, options.max_size(3440, 1440))[0], (2580, 1080));
         let native = ShareOptions { height: 0, ..options };
         assert_eq!(ladder(3440, 1440, native.max_size(3440, 1440))[0], (3440, 1440));
+    }
+
+    /// Needs a running sound server; `cargo test -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn lists_sound_apps() {
+        println!("{:?}", sound_apps());
     }
 
     #[test]

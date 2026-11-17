@@ -57,7 +57,7 @@ impl MainView {
             body = body.child(
                 v_flex()
                     .gap_1()
-                    .child(section_title(*title))
+                    .child(section_title(title))
                     .children(keys.iter().map(|(k, w)| row(k.to_string(), w.to_string()))),
             );
         }

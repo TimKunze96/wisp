@@ -10,8 +10,9 @@ use super::{SOUND_FRAME, SoundEncoder};
 pub struct Sound;
 
 impl Sound {
-    /// `packets` gets each 20 ms Opus packet.
-    pub fn start(mut packets: impl FnMut(Vec<u8>) + Send + 'static) -> Result<Self> {
+    /// `packets` gets each 20 ms Opus packet. The sound follows what was
+    /// picked, so there's no app to choose.
+    pub fn start(mut packets: impl FnMut(Vec<u8>) + Send + 'static, _app: Option<String>) -> Result<Self> {
         let mut encoder = SoundEncoder::new()?;
         let mut pending: Vec<f32> = Vec::new();
         set_sound(Some(Box::new(move |stereo: &[f32]| {
@@ -28,6 +29,11 @@ impl Sound {
         })));
         Ok(Self)
     }
+}
+
+/// Nothing to choose: the picked window or app brings its own sound.
+pub fn apps() -> Vec<super::SoundApp> {
+    Vec::new()
 }
 
 impl Drop for Sound {

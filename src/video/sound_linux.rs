@@ -1,6 +1,7 @@
 //! The sound of everything that plays, except Wisp itself (so viewers
-//! don't hear the voice chat twice): a PipeWire capture node that we link to
-//! every app's output ourselves, as Opus packets on the audio track.
+//! don't hear the voice chat twice), or of one app: a PipeWire capture node
+//! that we link to the apps' outputs ourselves, as Opus packets on the
+//! audio track.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -24,12 +25,13 @@ pub struct Sound {
 }
 
 impl Sound {
-    /// Start capturing; `packets` gets each 20 ms Opus packet.
-    pub fn start(packets: impl FnMut(Vec<u8>) + Send + 'static) -> Result<Self> {
+    /// Start capturing (everything, or only the app named `app`); `packets`
+    /// gets each 20 ms Opus packet.
+    pub fn start(packets: impl FnMut(Vec<u8>) + Send + 'static, app: Option<String>) -> Result<Self> {
         let (quit, quit_rx) = pw::channel::channel();
         let (ready_tx, ready) = std::sync::mpsc::channel();
         let thread = std::thread::Builder::new().name("screen-sound".into()).spawn(move || {
-            if let Err(e) = run(packets, quit_rx, &ready_tx) {
+            if let Err(e) = run(packets, app, quit_rx, &ready_tx) {
                 let _ = ready_tx.send(Err(e));
             }
         })?;
@@ -67,6 +69,7 @@ struct Graph {
 
 fn run(
     mut packets: impl FnMut(Vec<u8>) + 'static,
+    app: Option<String>,
     quit: pw::channel::Receiver<()>,
     ready: &std::sync::mpsc::Sender<Result<()>>,
 ) -> Result<()> {
@@ -150,7 +153,8 @@ fn run(
                     let client = props.get("client.id").and_then(|c| c.parse::<u32>().ok());
                     let ours = props.get("application.process.id") == Some(pid.as_str())
                         || client.is_some_and(|c| graph.own_clients.contains(&c));
-                    if props.get("media.class") == Some("Stream/Output/Audio") && !ours {
+                    let wanted = app.as_deref().is_none_or(|a| props.get("application.name") == Some(a));
+                    if props.get("media.class") == Some("Stream/Output/Audio") && !ours && wanted {
                         graph.apps.insert(obj.id);
                     }
                 }
@@ -192,6 +196,73 @@ fn run(
     graph.borrow_mut().links.clear();
     let _ = stream.disconnect();
     Ok(())
+}
+
+/// The apps playing sound right now (by name, not Wisp): one look at the
+/// PipeWire registry.
+pub fn apps() -> Vec<super::SoundApp> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new().name("sound-apps".into()).spawn(move || {
+        let _ = tx.send(scan_apps().unwrap_or_default());
+    });
+    if spawned.is_err() {
+        return Vec::new();
+    }
+    rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap_or_default()
+}
+
+fn scan_apps() -> Result<Vec<super::SoundApp>> {
+    pw::init();
+    let main_loop = pw::main_loop::MainLoopRc::new(None)?;
+    let context = pw::context::ContextRc::new(&main_loop, None)?;
+    let core = context.connect_rc(None).context("connecting to PipeWire")?;
+    let registry = core.get_registry_rc()?;
+    let pid = std::process::id().to_string();
+    let found: Rc<RefCell<Vec<super::SoundApp>>> = Rc::default();
+    let f = found.clone();
+    let _registry_listener = registry
+        .add_listener_local()
+        .global(move |obj| {
+            let Some(props) = obj.props else { return };
+            if obj.type_ != ObjectType::Node || props.get("media.class") != Some("Stream/Output/Audio") {
+                return;
+            }
+            if props.get("application.process.id") == Some(pid.as_str()) {
+                return;
+            }
+            // apps going through the ALSA bridge only name themselves in the node
+            let binary = props
+                .get("application.process.binary")
+                .or_else(|| props.get("node.name").and_then(|n| n.strip_prefix("alsa_playback.")))
+                .unwrap_or_default();
+            // other Wisp windows (the test clients, a second instance)
+            if binary == "wisp" {
+                return;
+            }
+            let Some(key) = props.get("application.name").filter(|n| !n.is_empty()) else { return };
+            // apps going through the ALSA bridge are all "PipeWire ALSA [binary]"
+            let name = if key.starts_with("PipeWire ALSA") && !binary.is_empty() { binary } else { key };
+            let mut found = f.borrow_mut();
+            if !found.iter().any(|a| a.key == key) {
+                found.push(super::SoundApp { key: key.to_string(), name: name.to_string() });
+            }
+        })
+        .register();
+    // everything the registry has is in once the server answers a sync
+    let pending = core.sync(0)?;
+    let ml = main_loop.clone();
+    let _core_listener = core
+        .add_listener_local()
+        .done(move |id, seq| {
+            if id == pw::core::PW_ID_CORE && seq == pending {
+                ml.quit();
+            }
+        })
+        .register();
+    main_loop.run();
+    let mut apps = found.take();
+    apps.sort_by_key(|a| a.name.to_lowercase());
+    Ok(apps)
 }
 
 /// Link every app output port to our input of the same channel (mono to both).

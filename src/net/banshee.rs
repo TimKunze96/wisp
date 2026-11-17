@@ -916,7 +916,7 @@ impl Session {
         let Some(old) = old else { return };
         if u.id != self.you && old.stream.is_none() && u.stream.is_some() && Some(u.channel) == my_channel {
             self.activity(&format!("{} started sharing their screen", u.name));
-            if let Ok(client) = u16::try_from(u32::from(u.id)) {
+            if let Ok(client) = u16::try_from(u.id) {
                 let title = format!("{} is sharing their screen", u.name);
                 let watch = Some((self.con_id, client, u.name.clone()));
                 let event = crate::notify::Event { kind: EventKind::ScreenShare, title, body: String::new(), watch };
@@ -1043,7 +1043,7 @@ impl Session {
         }
         // video frames and 20 ms sound packets
         let (tx, mut rx) = mpsc::channel(32);
-        self.sharing = Some(Sharing::start(start.source, start.options, tx));
+        self.sharing = Some(Sharing::start(start.source, start.options, start.sound_app, tx));
         let (video, back, con) = (self.video.clone(), self.back.clone(), self.con_id);
         tokio::task::spawn_local(async move {
             let mut share = None;

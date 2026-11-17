@@ -254,6 +254,7 @@ async fn handle(line: &str, cmds: &mpsc::UnboundedSender<Cmd>) -> Value {
                 let start = on.then(|| crate::video::ShareStart {
                     source: None,
                     options: crate::config::Settings::load().share_options(),
+                    sound_app: None,
                 });
                 let _ = cmds.send(Cmd::Share { con: s.con, start });
                 ok

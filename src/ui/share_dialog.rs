@@ -31,6 +31,10 @@ pub struct ShareDialog {
     opened: u64,
     /// Opened while sharing: switch the source, or stop.
     live: bool,
+    /// Apps playing sound right now (None while looking), and the one
+    /// picked (None: everything).
+    sound_apps: Option<Vec<crate::video::SoundApp>>,
+    sound_app: Option<String>,
 }
 
 enum SourceState {
@@ -57,9 +61,23 @@ impl MainView {
             gpu: None,
             opened: 0,
             live,
+            sound_apps: None,
+            sound_app: None,
         });
         if live {
             return;
+        }
+        if !crate::video::SOUND_FOLLOWS_PICK {
+            cx.spawn(async move |this, cx| {
+                let apps = cx.background_executor().spawn(async { crate::video::sound_apps() }).await;
+                let _ = this.update(cx, |t, cx| {
+                    if let Some(d) = &mut t.share {
+                        d.sound_apps = Some(apps);
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
         }
         // trying the encoders takes a moment the first time
         cx.spawn(async move |this, cx| {
@@ -126,7 +144,8 @@ impl MainView {
             })
         });
         let options = ShareOptions { height, fps, sound: sound && crate::video::SOUND };
-        self.send(cx, Cmd::Share { con: d.con, start: Some(ShareStart { source: Some(source), options }) });
+        let start = ShareStart { source: Some(source), options, sound_app: d.sound_app.clone() };
+        self.send(cx, Cmd::Share { con: d.con, start: Some(start) });
         cx.notify();
     }
 
@@ -246,9 +265,37 @@ impl MainView {
                             }
                             cx.notify();
                         })))
-                        .child(label("What your computer plays, except Wisp itself"))
+                        .child(label(if crate::video::SOUND_FOLLOWS_PICK {
+                            "A window or app brings only its own sound, a screen brings everything"
+                        } else {
+                            "What your computer plays, except Wisp itself"
+                        }))
                         .into_any_element(),
                 ));
+                // one app instead of everything
+                let apps = d.sound_apps.clone().unwrap_or_default();
+                if d.sound && !apps.is_empty() {
+                    let mut chips = h_flex().gap_2().flex_wrap().child(
+                        chip("sound-all", "Everything", d.sound_app.is_none()).on_click(cx.listener(|t, _, _, cx| {
+                            if let Some(d) = &mut t.share {
+                                d.sound_app = None;
+                            }
+                            cx.notify();
+                        })),
+                    );
+                    for (i, app) in apps.into_iter().enumerate() {
+                        let on = d.sound_app.as_deref() == Some(app.key.as_str());
+                        chips = chips.child(chip(("sound-app", i), app.name.clone(), on).on_click(cx.listener(
+                            move |t, _, _, cx| {
+                                if let Some(d) = &mut t.share {
+                                    d.sound_app = Some(app.key.clone());
+                                }
+                                cx.notify();
+                            },
+                        )));
+                    }
+                    body = body.child(row("Sound from", chips.into_any_element()));
+                }
             }
             body = body.child(div().text_sm().text_color(rgb(colors().muted)).child(d.note(info)));
         }
