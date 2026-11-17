@@ -263,7 +263,7 @@ fn previewing() -> bool {
 
 fn show_preview(rgb: &convert::Rgb) {
     let mut bgra = Vec::with_capacity(rgb.width * rgb.height * 4);
-    for px in rgb.data.chunks_exact(3) {
+    for px in rgb.data.as_chunks::<3>().0 {
         bgra.extend_from_slice(&[px[2], px[1], px[0], 255]);
     }
     for s in PREVIEWS.lock().unwrap().iter() {
