@@ -5,10 +5,8 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Result, format_err};
 use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::{Device, Stream, StreamConfig};
-use futures::prelude::*;
 use tokio::task::LocalSet;
-use tokio::time::{self, Duration};
-use tokio_stream::wrappers::IntervalStream;
+use tokio::time::Duration;
 use tracing::error;
 use tsclientlib::ClientId;
 use tsproto_packets::packets::InAudioBuf;
@@ -43,7 +41,7 @@ struct Callback {
 }
 
 impl TsToAudio {
-    pub fn new(device: Device, gate: Arc<Gate>, local_set: &LocalSet) -> Result<Arc<Mutex<Self>>> {
+    pub fn new(device: Device, gate: Arc<Gate>, _local_set: &LocalSet) -> Result<Arc<Mutex<Self>>> {
         let res = Arc::new(Mutex::new(Self {
             device,
             stream: None,
@@ -51,11 +49,12 @@ impl TsToAudio {
             gate,
             volumes: Arc::default(),
         }));
-        Self::start(res.clone(), local_set);
+        Self::start(res.clone());
         Ok(res)
     }
 
-    fn open_playback(&self) -> Result<Stream> {
+    /// Everything to open the playback stream, to run without the lock.
+    fn prepare_playback(&self) -> Opener {
         let config = StreamConfig {
             channels: 2,
             sample_rate: 48000,
@@ -67,17 +66,19 @@ impl TsToAudio {
             volumes: self.volumes.clone(),
             agc: HashMap::new(),
         };
-        let stream = self
-            .device
-            .build_output_stream(
-                config,
-                move |audio_data, _| callback.callback(audio_data),
-                |error| error!(%error, "Error during audio playback"),
-                Some(Duration::from_secs(5)),
-            )
-            .map_err(|e| format_err!("cpal error: {}", e))?;
-        stream.play().map_err(|e| format_err!("cpal error: {}", e))?;
-        Ok(stream)
+        let device = self.device.clone();
+        Box::new(move || {
+            let stream = device
+                .build_output_stream(
+                    config,
+                    move |audio_data, _| callback.callback(audio_data),
+                    |error| error!(%error, "Error during audio playback"),
+                    Some(Duration::from_secs(5)),
+                )
+                .map_err(|e| format_err!("cpal error: {}", e))?;
+            stream.play().map_err(|e| format_err!("cpal error: {}", e))?;
+            Ok(stream)
+        })
     }
 
     pub fn set_volume(&mut self, id: Id, volume: f32) {
@@ -95,32 +96,8 @@ impl TsToAudio {
         data.get_mut_queues().retain(|(c, _), _| *c != con);
     }
 
-    fn start(t2a: Arc<Mutex<Self>>, local_set: &LocalSet) {
-        // retried every second: log each new problem once, not each try
-        let mut failing: Option<String> = None;
-        local_set.spawn_local(
-            IntervalStream::new(time::interval(Duration::from_secs(1))).for_each(move |_| {
-                let mut t2a = t2a.lock().unwrap();
-                if t2a.stream.is_none() {
-                    match t2a.open_playback() {
-                        Ok(s) => {
-                            t2a.stream = Some(s);
-                            if failing.take().is_some() {
-                                tracing::info!("Opened playback device");
-                            }
-                        }
-                        Err(error) => {
-                            let error = error.to_string();
-                            if failing.as_ref() != Some(&error) {
-                                error!(%error, "Failed to open playback device");
-                                failing = Some(error);
-                            }
-                        }
-                    }
-                }
-                future::ready(())
-            }),
-        );
+    fn start(t2a: Arc<Mutex<Self>>) {
+        keep_open(&t2a, "playback", |t| &mut t.stream, |t| t.prepare_playback());
     }
 
     pub fn play_packet(&mut self, id: Id, packet: InAudioBuf) -> Result<()> {

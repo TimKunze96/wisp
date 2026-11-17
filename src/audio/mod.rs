@@ -92,3 +92,55 @@ pub fn start(input: Option<&str>, output: Option<&str>, local_set: &LocalSet) ->
     let a2ts = AudioToTs::new(input_device, gate.clone(), local_set)?;
     Ok(AudioData { a2ts, ts2a, gate })
 }
+
+/// Opens a device stream; built under the lock, run without it.
+type Opener = Box<dyn FnOnce() -> Result<cpal::Stream> + Send>;
+
+/// Opens a device stream, and again whenever it went away, on a thread of
+/// its own: opening can block for long (macOS waits until the microphone
+/// permission prompt is answered), and must not stall the network thread or
+/// hold the lock meanwhile. Stops once `this` is dropped.
+fn keep_open<T: Send + 'static>(
+    this: &Arc<Mutex<T>>,
+    what: &'static str,
+    slot: fn(&mut T) -> &mut Option<cpal::Stream>,
+    prepare: fn(&T) -> Opener,
+) {
+    let weak = Arc::downgrade(this);
+    let spawned = std::thread::Builder::new().name(format!("audio-{what}")).spawn(move || {
+        // log each new problem once, not each try
+        let mut failing: Option<String> = None;
+        loop {
+            let Some(this) = weak.upgrade() else { break };
+            let open = {
+                let mut t = this.lock().unwrap();
+                if slot(&mut t).is_some() { None } else { Some(prepare(&t)) }
+            };
+            if let Some(open) = open {
+                match open() {
+                    Ok(stream) => {
+                        let mut t = this.lock().unwrap();
+                        if slot(&mut t).is_none() {
+                            *slot(&mut t) = Some(stream);
+                        }
+                        if failing.take().is_some() {
+                            tracing::info!("Opened {what} device");
+                        }
+                    }
+                    Err(error) => {
+                        let error = error.to_string();
+                        if failing.as_ref() != Some(&error) {
+                            tracing::error!(%error, "Failed to open {what} device");
+                            failing = Some(error);
+                        }
+                    }
+                }
+            }
+            drop(this);
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+    });
+    if let Err(e) = spawned {
+        tracing::error!("couldn't start the {what} thread: {e}");
+    }
+}

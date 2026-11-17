@@ -6,11 +6,9 @@ use audiopus::coder::Encoder;
 use nnnoiseless::DenoiseState;
 use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::{Device, Stream, StreamConfig};
-use futures::prelude::*;
 use tokio::sync::mpsc;
 use tokio::task::LocalSet;
-use tokio::time::{self, Duration};
-use tokio_stream::wrappers::IntervalStream;
+use tokio::time::Duration;
 use tracing::{error, warn};
 
 use super::*;
@@ -40,7 +38,7 @@ struct Callback {
 }
 
 impl AudioToTs {
-    pub fn new(device: Device, gate: Arc<Gate>, local_set: &LocalSet) -> Result<Arc<Mutex<Self>>> {
+    pub fn new(device: Device, gate: Arc<Gate>, _local_set: &LocalSet) -> Result<Arc<Mutex<Self>>> {
         let res = Arc::new(Mutex::new(Self {
             device,
             listener: Arc::default(),
@@ -48,11 +46,12 @@ impl AudioToTs {
             volume: Arc::new(AtomicU32::new(1.0_f32.to_bits())),
             gate,
         }));
-        Self::start(res.clone(), local_set);
+        Self::start(res.clone());
         Ok(res)
     }
 
-    fn open_capture(&self) -> Result<Stream> {
+    /// Everything to open the capture stream, to run without the lock.
+    fn prepare_capture(&self) -> Opener {
         let config = StreamConfig {
             channels: 1,
             sample_rate: 48000,
@@ -78,17 +77,19 @@ impl AudioToTs {
             denoise_in: [0.0; _],
             denoise_out: [0.0; _],
         };
-        let stream = self
-            .device
-            .build_input_stream(
-                config,
-                move |audio_data, _| callback.callback(audio_data),
-                |error| error!(%error, "Error during audio capture"),
-                Some(Duration::from_secs(5)),
-            )
-            .map_err(|e| format_err!("cpal error: {}", e))?;
-        stream.play().map_err(|e| format_err!("cpal error: {}", e))?;
-        Ok(stream)
+        let device = self.device.clone();
+        Box::new(move || {
+            let stream = device
+                .build_input_stream(
+                    config,
+                    move |audio_data, _| callback.callback(audio_data),
+                    |error| error!(%error, "Error during audio capture"),
+                    Some(Duration::from_secs(5)),
+                )
+                .map_err(|e| format_err!("cpal error: {}", e))?;
+            stream.play().map_err(|e| format_err!("cpal error: {}", e))?;
+            Ok(stream)
+        })
     }
 
     pub fn set_listener(&self, sender: mpsc::Sender<Vec<u8>>) {
@@ -99,33 +100,8 @@ impl AudioToTs {
         self.volume.store(volume.to_bits(), Ordering::Relaxed);
     }
 
-    fn start(a2t: Arc<Mutex<Self>>, local_set: &LocalSet) {
-        // Opens the stream and reopens it when the device goes away.
-        // retried every second: log each new problem once, not each try
-        let mut failing: Option<String> = None;
-        local_set.spawn_local(
-            IntervalStream::new(time::interval(Duration::from_secs(1))).for_each(move |_| {
-                let mut a2t = a2t.lock().unwrap();
-                if a2t.stream.is_none() {
-                    match a2t.open_capture() {
-                        Ok(s) => {
-                            a2t.stream = Some(s);
-                            if failing.take().is_some() {
-                                tracing::info!("Opened capture device");
-                            }
-                        }
-                        Err(error) => {
-                            let error = error.to_string();
-                            if failing.as_ref() != Some(&error) {
-                                error!(%error, "Failed to open capture device");
-                                failing = Some(error);
-                            }
-                        }
-                    }
-                }
-                future::ready(())
-            }),
-        );
+    fn start(a2t: Arc<Mutex<Self>>) {
+        keep_open(&a2t, "capture", |t| &mut t.stream, |t| t.prepare_capture());
     }
 }
 

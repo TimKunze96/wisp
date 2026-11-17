@@ -461,6 +461,13 @@ pub fn ptt_socket() -> PathBuf {
 }
 
 pub fn runtime_dir() -> PathBuf {
+    // macOS: $TMPDIR is set in Terminal but not over SSH or for every
+    // launcher, so the app and the command line could look in different places
+    if cfg!(target_os = "macos") {
+        let dir = crate::config::cache_dir();
+        let _ = std::fs::create_dir_all(&dir);
+        return dir;
+    }
     std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(std::env::temp_dir)
 }
 
