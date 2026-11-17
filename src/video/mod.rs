@@ -447,6 +447,37 @@ impl std::fmt::Debug for Source {
     }
 }
 
+impl Source {
+    /// A handle for looking at what the source shows, before it's shared.
+    pub fn peek(&self) -> SourcePeek {
+        SourcePeek(self.latest.clone())
+    }
+}
+
+/// Looks at a source's newest frame without taking it (the encoder still
+/// gets it), for the share dialog's preview.
+#[derive(Clone)]
+pub struct SourcePeek(Arc<Latest>);
+
+impl SourcePeek {
+    /// The newest frame scaled to fit `max_w` x `max_h`; None until one came.
+    pub fn picture(&self, max_w: usize, max_h: usize) -> Option<Picture> {
+        let rgb = {
+            let guard = self.0.frame.lock().unwrap();
+            let frame = guard.0.as_ref()?;
+            let scale = (max_w as f64 / frame.width as f64).min(max_h as f64 / frame.height as f64).min(1.0);
+            let w = ((frame.width as f64 * scale) as usize & !1).max(2);
+            let h = ((frame.height as f64 * scale) as usize & !1).max(2);
+            convert::Rgb::from_raw(frame, w, h)
+        };
+        let mut bgra = Vec::with_capacity(rgb.width * rgb.height * 4);
+        for px in rgb.data.as_chunks::<3>().0 {
+            bgra.extend_from_slice(&[px[2], px[1], px[0], 255]);
+        }
+        Some(Picture { width: rgb.width as u32, height: rgb.height as u32, bgra })
+    }
+}
+
 /// Start capturing (on Linux the desktop asks what) and wait for the first
 /// frame, which tells the size. Blocks; run it off the UI thread.
 pub fn open(pick: Pick) -> Result<Source> {
