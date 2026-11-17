@@ -23,6 +23,7 @@ pub enum EventKind {
     Disconnected,
     MicToggled,
     FriendOnline,
+    ScreenShare,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -32,7 +33,7 @@ pub struct EventSetting {
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 10] = [
+    pub const ALL: [EventKind; 11] = [
         EventKind::Poke,
         EventKind::PrivateMessage,
         EventKind::Mention,
@@ -42,6 +43,7 @@ impl EventKind {
         EventKind::MovedOrKicked,
         EventKind::Disconnected,
         EventKind::FriendOnline,
+        EventKind::ScreenShare,
         EventKind::MicToggled,
     ];
 
@@ -57,6 +59,7 @@ impl EventKind {
             EventKind::Disconnected => "Connection lost",
             EventKind::MicToggled => "Mic muted / unmuted",
             EventKind::FriendOnline => "A friend comes online",
+            EventKind::ScreenShare => "Someone starts sharing their screen",
         }
     }
 
@@ -72,6 +75,7 @@ impl EventKind {
             EventKind::Disconnected => "unplug",
             EventKind::MicToggled => "mic",
             EventKind::FriendOnline => "star",
+            EventKind::ScreenShare => "monitor-up",
         }
     }
 
@@ -85,7 +89,7 @@ impl EventKind {
             EventKind::Poke | EventKind::PrivateMessage | EventKind::Mention => (true, true),
             EventKind::MovedOrKicked | EventKind::Disconnected => (true, true),
             EventKind::ChannelMessage => (true, false),
-            EventKind::FriendOnline => (true, true),
+            EventKind::FriendOnline | EventKind::ScreenShare => (true, true),
             EventKind::UserJoined | EventKind::UserLeft | EventKind::MicToggled => (true, false),
         };
         EventSetting { sound, popup }
@@ -96,7 +100,7 @@ impl EventKind {
             EventKind::Poke => Sound::Poke,
             EventKind::PrivateMessage | EventKind::Mention => Sound::Message,
             EventKind::ChannelMessage => Sound::Soft,
-            EventKind::UserJoined | EventKind::FriendOnline => Sound::Join,
+            EventKind::UserJoined | EventKind::FriendOnline | EventKind::ScreenShare => Sound::Join,
             EventKind::UserLeft => Sound::Leave,
             EventKind::MovedOrKicked | EventKind::Disconnected => Sound::Alert,
             EventKind::MicToggled => Sound::Soft,
@@ -110,6 +114,8 @@ pub struct Event {
     pub kind: EventKind,
     pub title: String,
     pub body: String,
+    /// A stream the popup can open: (connection, client id, name).
+    pub watch: Option<(u64, u16, String)>,
 }
 
 #[derive(Clone, Copy)]
@@ -344,8 +350,29 @@ fn popup(event: &Event) {
     if matches!(event.kind, EventKind::Poke | EventKind::MovedOrKicked) {
         cmd.args(["--urgency", "critical"]);
     }
-    cmd.arg(&event.title).arg(&event.body);
-    run(cmd);
+    let Some((con, client, name)) = event.watch.clone() else {
+        cmd.arg(&event.title).arg(&event.body);
+        run(cmd);
+        return;
+    };
+    // a Watch button: notify-send waits and prints the action picked
+    // (libnotify 0.7.12+; older ones get the plain popup)
+    let (title, body) = (event.title.clone(), event.body.clone());
+    std::thread::spawn(move || {
+        cmd.args(["--action=watch=Watch", "--wait"]).arg(&title).arg(&body);
+        match cmd.output() {
+            Ok(out) if out.status.success() => {
+                if String::from_utf8_lossy(&out.stdout).trim() == "watch" {
+                    crate::ctl::ui(crate::ctl::UiRequest::Watch(con, client, name, false));
+                }
+            }
+            _ => {
+                let mut plain = Command::new("notify-send");
+                plain.args(["--app-name", "Wisp", "--icon", "audio-headset"]).arg(&title).arg(&body);
+                run(plain);
+            }
+        }
+    });
 }
 
 #[cfg(not(target_os = "linux"))]

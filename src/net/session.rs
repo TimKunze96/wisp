@@ -321,6 +321,7 @@ impl Session {
                             kind: crate::notify::EventKind::PrivateMessage,
                             title: "Offline messages".into(),
                             body: text,
+                            watch: None,
                         }));
                     }
                 }
@@ -959,7 +960,7 @@ impl Session {
     }
 
     fn event(&self, kind: EventKind, title: String, body: String) {
-        let _ = self.back.send(SessionMsg::Event(self.con_id, crate::notify::Event { kind, title, body }));
+        let _ = self.back.send(SessionMsg::Event(self.con_id, crate::notify::Event { kind, title, body, watch: None }));
     }
 
     fn report_changes(&mut self, state: &data::Connection) {
