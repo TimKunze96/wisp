@@ -149,6 +149,8 @@ fn action_id(action: Action) -> &'static str {
         Action::ToggleMute => "toggle-mute",
         Action::ToggleDeafen => "toggle-deafen",
         Action::ShowWindow => "show-window",
+        Action::ToggleShare => "toggle-share",
+        Action::ToggleStreamSound => "toggle-stream-sound",
     }
 }
 

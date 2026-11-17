@@ -12,7 +12,8 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use banshee_client::{
     Account, Channel, ChannelEdit, ChatTarget, Client, ClientMsg, Files, Identity, Key, Leave, NewChannel,
-    OfflineMessage, Options, Request, Role, ServerEdit, ServerInfo as Info, ServerMsg, User, UserId, Whisper, key_hex,
+    OfflineMessage, Options, Perm, Request, Role, ServerEdit, ServerInfo as Info, ServerMsg, User, UserId, Video, Watching,
+    Whisper, key_hex,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
@@ -26,6 +27,7 @@ use super::*;
 use crate::ConnectionId;
 use crate::config::{self, Bookmark, WhisperTarget};
 use crate::notify::EventKind;
+use crate::video::{Screen, ShareMsg, Sharing};
 
 pub const SCHEME: &str = "banshee://";
 
@@ -35,6 +37,13 @@ const WHISPER_SETTLE: Duration = Duration::from_millis(100);
 
 pub fn is_banshee(address: &str) -> bool {
     address.starts_with(SCHEME)
+}
+
+/// The domain in "host:port", which its certificate is for (None for IP
+/// addresses, which only work with a pinned fingerprint).
+fn domain(host: &str) -> Option<&str> {
+    let name = host.rsplit_once(':').map_or(host, |(h, _)| h);
+    (!name.starts_with('[') && name.parse::<std::net::IpAddr>().is_err()).then_some(name)
 }
 
 /// "banshee://host:port#fingerprint" into ("host:port", fingerprint).
@@ -123,6 +132,11 @@ struct Session {
     avatars_requested: HashSet<(Key, String)>,
     /// A background task (transfer, avatar) changed something to show.
     dirty: Rc<Cell<bool>>,
+    video: Video,
+    /// Our screen, while we share it.
+    sharing: Option<Sharing>,
+    /// Screens we watch (or asked to).
+    watching: HashMap<UserId, Screen>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -159,7 +173,8 @@ async fn connect_and_run(
     let name = if bookmark.nickname.trim().is_empty() { "Wisp user" } else { bookmark.nickname.trim() };
     let identity = identity()?;
     let password = Some(bookmark.password.as_str()).filter(|p| !p.is_empty());
-    let opts = Options { name, identity: &identity, fingerprint: fingerprint.as_deref(), password };
+    let server_name = domain(&host);
+    let opts = Options { name, identity: &identity, fingerprint: fingerprint.as_deref(), password, server_name };
     let mut client = Client::connect(addr, opts).await?;
     let voice = client.voice();
 
@@ -199,15 +214,29 @@ async fn connect_and_run(
         avatar_dir: crate::config::cache_dir().join("avatars").join(session::sanitize(&bookmark.address)),
         avatars_requested: HashSet::new(),
         dirty: Default::default(),
+        video: client.video(),
+        sharing: None,
+        watching: HashMap::new(),
     };
     s.base.status = Status::Connected;
     s.base.platform = "Banshee".into();
+    s.base.screens = true;
     if input_muted {
         client.send(ClientMsg::SetMuted { input: true, output: false });
     }
     s.join_path(&client, &bookmark.channel);
     s.publish();
 
+    // screens arrive on their own task: reading a stream's header can't be cut short
+    let (screens_tx, mut screens) = mpsc::unbounded_channel();
+    let video = s.video.clone();
+    tokio::task::spawn_local(async move {
+        while let Ok(w) = video.next().await {
+            if screens_tx.send(w).is_err() {
+                break;
+            }
+        }
+    });
     let mut tick = tokio::time::interval(Duration::from_millis(100));
     loop {
         tokio::select! {
@@ -225,11 +254,18 @@ async fn connect_and_run(
                     None => bail!("Disconnected by the server"),
                 },
             },
+            Some(w) = screens.recv() => s.watch_stream(w),
             v = voice.recv() => match v {
                 Ok(v) => s.play(v),
                 Err(_) => bail!(s.removed.take().unwrap_or_else(|| "Disconnected by the server".into())),
             },
             _ = tick.tick() => {
+                s.watching.retain(|_, screen| !screen.ended());
+                for (id, screen) in &s.watching {
+                    if screen.wants_keyframe() {
+                        client.send(ClientMsg::WantKeyframe { user: *id });
+                    }
+                }
                 let running = s.transfers.borrow().iter().any(|t| t.state == TransferState::Running);
                 if s.dirty.replace(false) || running {
                     s.publish();
@@ -268,6 +304,20 @@ impl Session {
     fn key_for(&self, d: u64) -> Option<Key> {
         let known = self.accounts.iter().map(|a| a.key).chain(self.users.values().map(|u| u.key));
         known.into_iter().find(|k| db_id(k) == d)
+    }
+
+    /// What our role lets us manage; Banshee has no channel groups,
+    /// complaints, permission lists, temporary passwords or connection stats.
+    fn rights(&self) -> crate::net::Rights {
+        let may = |p: Perm| self.me().and_then(|me| self.role(me.role)).is_some_and(|r| r.perms.contains(&p));
+        crate::net::Rights {
+            edit_server: may(Perm::ManageServer),
+            server_groups: may(Perm::ManageRoles),
+            keys: may(Perm::ManageRoles),
+            bans: may(Perm::Ban),
+            log: may(Perm::ManageServer),
+            ..Default::default()
+        }
     }
 
     fn role(&self, id: u32) -> Option<&Role> {
@@ -360,6 +410,35 @@ impl Session {
             SessionCmd::Files(cmd) => self.file_cmd(client, cmd),
             SessionCmd::SetAvatar(Some((path, _))) => self.set_avatar(path),
             SessionCmd::SetAvatar(None) => client.send(ClientMsg::ClearAvatar),
+            SessionCmd::Share(Some(start)) => self.share(start),
+            SessionCmd::Share(None) => self.sharing = None,
+            SessionCmd::ShareSwitch(source) => {
+                if let Some(s) = &self.sharing {
+                    s.switch(source);
+                }
+            }
+            SessionCmd::Watch(id, Some(screen), quality) => {
+                let id = UserId::from(id);
+                client.send(ClientMsg::Watch { user: id, quality });
+                if let Some(old) = self.watching.insert(id, screen) {
+                    old.end();
+                }
+            }
+            SessionCmd::StreamVolume(id, volume) => {
+                if let Some(audio) = &self.audio {
+                    audio.ts2a.lock().unwrap().set_volume(stream_sound_id(self.con_id, id.into()), volume);
+                }
+            }
+            SessionCmd::WatchQuality(id, quality) => {
+                client.send(ClientMsg::SetQuality { user: UserId::from(id), quality });
+            }
+            SessionCmd::Watch(id, None, _) => {
+                let id = UserId::from(id);
+                if let Some(screen) = self.watching.remove(&id) {
+                    screen.end();
+                    client.send(ClientMsg::Unwatch { user: id });
+                }
+            }
             // avatars, recording notices, icons, details: TeamSpeak's
             _ => {}
         }
@@ -466,7 +545,8 @@ impl Session {
                 let Ok(id) = u32::try_from(channel) else { return };
                 ClientMsg::DeleteChannel { id }
             }
-            AdminAction::ChannelGroup { .. } | AdminAction::Subscribe { .. } => return,
+            // everything is always visible on Banshee
+            AdminAction::ChannelGroup { .. } | AdminAction::Subscribe { .. } | AdminAction::SubscribeAll { .. } => return,
         };
         client.send(msg);
     }
@@ -824,6 +904,11 @@ impl Session {
                 let name = self.channels.iter().find(|c| c.id == channel).map(|c| c.name.clone()).unwrap_or_default();
                 let _ = self.back.send(SessionMsg::NeedChannelPassword(self.con_id, channel.into(), name, wrong));
             }
+            ServerMsg::SendKeyframe { layer } => {
+                if let Some(s) = &self.sharing {
+                    s.keyframe(layer);
+                }
+            }
             ServerMsg::TokenCreated(t) => self.activity(&format!("New token: {}", t.token)),
             ServerMsg::Notice { text } => {
                 self.activity(&text);
@@ -851,6 +936,15 @@ impl Session {
         let my_channel = self.me().map(|m| m.channel);
         let old = self.users.insert(u.id, u.clone());
         let Some(old) = old else { return };
+        if u.id != self.you && old.stream.is_none() && u.stream.is_some() && Some(u.channel) == my_channel {
+            self.activity(&format!("{} started sharing their screen", u.name));
+            if let Ok(client) = u16::try_from(u.id) {
+                let title = format!("{} is sharing their screen", u.name);
+                let watch = Some((self.con_id, client, u.name.clone()));
+                let event = crate::notify::Event { kind: EventKind::ScreenShare, title, body: String::new(), watch };
+                let _ = self.back.send(SessionMsg::Event(self.con_id, event));
+            }
+        }
         if u.id == self.you || old.channel == u.channel {
             return;
         }
@@ -959,10 +1053,90 @@ impl Session {
     }
 
     fn event(&self, kind: EventKind, title: String, body: String) {
-        let _ = self.back.send(SessionMsg::Event(self.con_id, crate::notify::Event { kind, title, body }));
+        let _ = self.back.send(SessionMsg::Event(self.con_id, crate::notify::Event { kind, title, body, watch: None }));
     }
 
     /// Send the current state to the manager.
+    /// Capture and encode on a thread; the stream to the server opens with
+    /// the first frame (so a cancelled picker shows nothing to others).
+    fn share(&mut self, start: crate::video::ShareStart) {
+        if self.sharing.is_some() && self.me().is_some_and(|me| me.stream.is_some()) {
+            return;
+        }
+        // video frames and 20 ms sound packets
+        let (tx, mut rx) = mpsc::channel(32);
+        self.sharing = Some(Sharing::start(start.source, start.options, start.sound_app, tx));
+        let (video, back, con) = (self.video.clone(), self.back.clone(), self.con_id);
+        tokio::task::spawn_local(async move {
+            let mut share = None;
+            while let Some(msg) = rx.recv().await {
+                match msg {
+                    ShareMsg::Started(info) => match video.share(&info).await {
+                        Ok(s) => share = Some(s),
+                        Err(e) => {
+                            let _ = back.send(SessionMsg::Activity(con, format!("Couldn't share: {e:#}"), false));
+                            break;
+                        }
+                    },
+                    ShareMsg::Packet(p) => {
+                        if let Some(s) = share.as_mut()
+                            && s.send(&p).await.is_err()
+                        {
+                            break;
+                        }
+                    }
+                    ShareMsg::Failed(e) => {
+                        let _ = back.send(SessionMsg::Activity(con, e, false));
+                        break;
+                    }
+                }
+            }
+            if let Some(s) = share {
+                s.stop();
+            }
+        });
+    }
+
+    /// A screen we asked for arrived: decode it onto its viewer.
+    fn watch_stream(&mut self, mut w: Watching) {
+        let Some(screen) = self.watching.get(&w.from).cloned() else { return };
+        let audio = self.audio.clone();
+        let id = stream_sound_id(self.con_id, w.from);
+        let layers: Vec<(u16, u16)> = self
+            .users
+            .get(&w.from)
+            .and_then(|u| u.stream.as_ref())
+            .map(|s| s.layers.iter().map(|l| (l.width, l.height)).collect())
+            .unwrap_or_default();
+        tokio::task::spawn_local(async move {
+            let (tx, rx) = std::sync::mpsc::channel();
+            crate::video::decode(rx, screen.clone(), layers);
+            let mut seq = 0u16;
+            while let Ok(Some(packet)) = w.packet().await {
+                if screen.ended() {
+                    break;
+                }
+                if packet.is_audio() {
+                    // the voice mixer plays it, as stereo "music"
+                    let Some(audio) = &audio else { continue };
+                    let out = OutAudio::new(&AudioPacket::S2C {
+                        id: seq,
+                        codec: CodecType::OpusMusic,
+                        from: id.1.0,
+                        data: &packet.data,
+                    });
+                    seq = seq.wrapping_add(1);
+                    if let Ok(input) = InAudioBuf::try_new(Direction::S2C, out.into_vec()) {
+                        let _ = audio.ts2a.lock().unwrap().play_packet(id, input);
+                    }
+                } else if tx.send(packet).is_err() {
+                    break;
+                }
+            }
+            screen.end();
+        });
+    }
+
     fn publish(&mut self) {
         self.fetch_avatars();
         let mut snap = self.base.clone();
@@ -985,6 +1159,7 @@ impl Session {
             })
             .collect();
         snap.own_channel = self.me().map(|u| u64::from(u.channel));
+        snap.rights = self.rights();
         snap.users = self.users.len();
         snap.groups = self
             .roles
@@ -1052,9 +1227,16 @@ impl Session {
             icon: None,
             volume: 1.0,
             locally_muted: false,
+            stream: u.stream.clone(),
             uid: key_hex(&u.key),
         }
     }
+}
+
+/// Where a shared screen's sound goes in the voice mixer: next to the
+/// sharer's voice, with the top bit set.
+fn stream_sound_id(con: ConId, from: UserId) -> crate::audio::ts_to_audio::Id {
+    (ConnectionId(con), ClientId(0x8000 | (from as u16 & 0x7fff)))
 }
 
 /// Server messages start lowercase; our activity lines don't.
@@ -1147,7 +1329,14 @@ fn channel_row(c: &Channel, depth: usize, clients: Vec<ClientRow>) -> ChannelRow
 
 #[cfg(test)]
 mod tests {
-    use super::parse;
+    use super::{domain, parse};
+
+    #[test]
+    fn domains() {
+        assert_eq!(domain("voice.example.com:7700"), Some("voice.example.com"));
+        assert_eq!(domain("1.2.3.4:9000"), None);
+        assert_eq!(domain("[::1]:7700"), None);
+    }
 
     #[test]
     fn addresses() {

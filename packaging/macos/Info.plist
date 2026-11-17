@@ -5,5 +5,7 @@
 <dict>
   <key>NSMicrophoneUsageDescription</key>
   <string>Wisp needs the microphone so others on the server can hear you.</string>
+  <key>NSScreenCaptureUsageDescription</key>
+  <string>Wisp shares the screen, window or app you pick with your channel.</string>
 </dict>
 </plist>

@@ -84,6 +84,10 @@ pub enum PromptKind {
     Complain,
     /// Confirm moving a channel with people in it (`Prompt::key` says how many).
     MoveChannel { parent: u64, after: u64 },
+    /// Forget a saved server (`Prompt::key` is the bookmark id).
+    RemoveServer,
+    /// Redeem a privilege key (an admin token on Banshee).
+    UseKey,
 }
 
 pub struct Prompt {
@@ -117,6 +121,8 @@ impl PromptKind {
             PromptKind::Description => "Your description".into(),
             PromptKind::Complain => format!("Complain about {name}"),
             PromptKind::MoveChannel { .. } => format!("Move {name}?"),
+            PromptKind::RemoveServer => format!("Remove {name}?"),
+            PromptKind::UseKey => "Use a privilege key".into(),
         }
     }
     fn placeholder(self) -> &'static str {
@@ -129,16 +135,21 @@ impl PromptKind {
             PromptKind::Away | PromptKind::TalkRequest => "Message (optional)",
             PromptKind::Description => "Shown in your details",
             PromptKind::Complain => "What happened",
+            PromptKind::UseKey => "The key someone gave you",
             _ => "Reason (optional)",
         }
     }
     fn has_input(self) -> bool {
-        !matches!(self, PromptKind::DeleteChannel | PromptKind::MoveChannel { .. })
+        !matches!(self, PromptKind::DeleteChannel | PromptKind::MoveChannel { .. } | PromptKind::RemoveServer)
     }
     fn danger(self) -> bool {
         matches!(
             self,
-            PromptKind::KickChannel | PromptKind::KickServer | PromptKind::Ban(_) | PromptKind::DeleteChannel
+            PromptKind::KickChannel
+                | PromptKind::KickServer
+                | PromptKind::Ban(_)
+                | PromptKind::DeleteChannel
+                | PromptKind::RemoveServer
         )
     }
     fn confirm_label(self) -> &'static str {
@@ -150,6 +161,8 @@ impl PromptKind {
             PromptKind::TalkRequest => "Request",
             PromptKind::DeleteChannel => "Delete",
             PromptKind::MoveChannel { .. } => "Move",
+            PromptKind::RemoveServer => "Remove",
+            PromptKind::UseKey => "Use key",
             k if k.danger() => "Confirm",
             _ => "Save",
         }
@@ -174,7 +187,9 @@ impl PromptKind {
             | PromptKind::Away
             | PromptKind::TalkRequest
             | PromptKind::Description
-            | PromptKind::Complain => return None,
+            | PromptKind::Complain
+            | PromptKind::RemoveServer
+            | PromptKind::UseKey => return None,
             PromptKind::MoveChannel { parent, after } => AdminAction::MoveChannel { channel: target, parent, after },
         })
     }
@@ -254,6 +269,17 @@ impl MainView {
                 let action = SelfAction::Description(text.clone());
                 self.model.read(cx).net.send(Cmd::Me { con: p.con, action });
             }
+            PromptKind::RemoveServer => {
+                let id = p.key.clone();
+                if p.con != 0 {
+                    self.model.read(cx).net.send(Cmd::Disconnect(p.con));
+                }
+                self.model.update(cx, |m, cx| m.update_settings(cx, |s| s.bookmarks.retain(|b| b.id != id)));
+            }
+            PromptKind::UseKey if !text.trim().is_empty() => {
+                let write = crate::net::admin::AdminWrite::UseToken { token: text.trim().to_string() };
+                self.model.read(cx).net.send(Cmd::Write { con: p.con, write });
+            }
             PromptKind::Complain if !text.is_empty() => {
                 let write = crate::net::admin::AdminWrite::AddComplaint { db_id: p.target, message: text.clone() };
                 self.model.read(cx).net.send(Cmd::Write { con: p.con, write });
@@ -297,6 +323,14 @@ impl MainView {
                                 "{} in it or below will move along.",
                                 if p.key == "1" { "1 person is".to_string() } else { format!("{} people are", p.key) }
                             )))
+                        })
+                        .when(matches!(kind, PromptKind::RemoveServer), |d| {
+                            d.child(
+                                div()
+                                    .text_sm()
+                                    .text_color(rgb(colors().muted))
+                                    .child("Its password, nickname and other settings go with it."),
+                            )
                         })
                         .when(matches!(kind, PromptKind::DeleteChannel), |d| {
                             d.child(
@@ -381,6 +415,16 @@ pub fn user_menu(
                 }
             }))
             .item(row("hand", "Poke...", colors().muted).on_click(ask(PromptKind::Poke)));
+        if d.row.stream.is_some() {
+            let m = model.clone();
+            menu = menu.item(row("monitor-play", "Watch screen", colors().muted).on_click(move |_, _, cx| {
+                m.update(cx, |m, cx| m.stage(Some((con, id)), cx))
+            }));
+            let (m, name) = (model.clone(), name.clone());
+            menu = menu.item(row("external-link", "Watch in its own window", colors().muted).on_click(move |_, _, cx| {
+                super::open_screen(&m, con, id, name.clone(), cx)
+            }));
+        }
 
         let (m, u, muted) = (model.clone(), uid.clone(), d.row.locally_muted);
         menu = menu.item(
@@ -483,9 +527,10 @@ pub fn user_menu(
         });
     }
 
+    let rights = model.read(cx).snap.server(con).map(|s| s.rights.clone()).unwrap_or_default();
     let (db_id, their) = (d.row.db_id, d.their_channel);
     let (m1, m2, n1, n2) = (model.clone(), model.clone(), name.clone(), name.clone());
-    menu = menu
+    menu = menu.when(rights.permissions, |menu| menu
         .item(row("lock-keyhole", "Permissions...", colors().muted).on_click(move |_, _, cx| {
             super::open_admin(&m1, con, super::AdminTab::Perms(PermTarget::Client(db_id), n1.clone()), cx)
         }))
@@ -496,7 +541,7 @@ pub fn user_menu(
         .item(row("lock-keyhole", "Permissions in this channel...", colors().muted).on_click(move |_, _, cx| {
             let tab = super::AdminTab::Perms(PermTarget::ChannelClient { channel: their, client: db_id }, format!("{n2} in channel"));
             super::open_admin(&m2, con, tab, cx)
-        }));
+        })));
 
     if !d.row.me {
         menu = menu
@@ -504,11 +549,11 @@ pub fn user_menu(
                 let (m, uid, name) = (model.clone(), uid.clone(), name.clone());
                 move |_, _, cx| super::open_admin(&m, con, super::AdminTab::Inbox(Some((uid.clone(), name.clone()))), cx)
             }))
-            .item(row("flag", "Complain...", colors().muted).on_click({
+            .when(rights.complain, |menu| menu.item(row("flag", "Complain...", colors().muted).on_click({
                 // complaints go by database id, not client id
                 let (p, name) = (prompt_fn(view, con, d.row.db_id), name.clone());
                 move |_, w, cx| p(PromptKind::Complain, name.clone(), String::new(), w, cx)
-            }))
+            })))
             .separator()
             .item(row("log-out", "Kick from channel...", colors().red).on_click(ask(PromptKind::KickChannel)))
             .item(row("door-open", "Kick from server...", colors().red).on_click(ask(PromptKind::KickServer)));
@@ -533,6 +578,174 @@ pub fn user_menu(
 
     menu.separator().item(row("copy", "Copy unique ID", colors().muted).on_click(move |_, _, cx| {
         cx.write_to_clipboard(ClipboardItem::new_string(uid.clone()));
+    }))
+}
+
+/// A link others can open to join `address`.
+pub fn invite_link(address: &str) -> String {
+    if crate::net::is_banshee(address) {
+        return address.to_string();
+    }
+    match address.rsplit_once(':') {
+        Some((host, port)) if !host.contains(':') && port.parse::<u16>().is_ok() => {
+            format!("ts3server://{host}?port={port}")
+        }
+        _ => format!("ts3server://{address}"),
+    }
+}
+
+/// The server as a whole: below the channels, on its name, in the sidebar.
+pub fn server_menu(
+    menu: PopupMenu,
+    con: ConId,
+    model: &Entity<Model>,
+    view: &WeakEntity<MainView>,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenu {
+    let m = model.read(cx);
+    let Some(s) = m.snap.servers.iter().find(|s| s.con == con) else { return menu };
+    let name = if s.server_name.is_empty() { s.label.clone() } else { s.server_name.clone() };
+    let bookmark = s.bookmark.clone();
+    let address = m.settings.bookmarks.iter().find(|b| b.id == bookmark).map(|b| b.address.clone()).unwrap_or_default();
+    let banshee = crate::net::is_banshee(&address);
+    // channels with something below them can fold
+    let parents: Vec<u64> = s.channels.iter().filter(|c| s.channels.iter().any(|o| o.parent == c.id)).map(|c| c.id).collect();
+    let admin = |tab: super::AdminTab| {
+        let m = model.clone();
+        move |_: &gpui_kit::ClickEvent, _: &mut Window, cx: &mut App| super::open_admin(&m, con, tab.clone(), cx)
+    };
+    let fold = |collapse: bool| {
+        let (m, bookmark, parents) = (model.clone(), bookmark.clone(), parents.clone());
+        move |_: &gpui_kit::ClickEvent, _: &mut Window, cx: &mut App| {
+            m.update(cx, |m, cx| {
+                m.update_settings(cx, |st| {
+                    for id in &parents {
+                        let key = crate::config::channel_key(&bookmark, *id);
+                        if collapse {
+                            st.collapsed.insert(key);
+                        } else {
+                            st.collapsed.remove(&key);
+                        }
+                    }
+                })
+            })
+        }
+    };
+    let send = |cmd: fn(ConId) -> Cmd| {
+        let m = model.clone();
+        move |_: &gpui_kit::ClickEvent, _: &mut Window, cx: &mut App| m.read(cx).net.send(cmd(con))
+    };
+    let use_key = prompt_fn(view, con, 0);
+    let view = view.clone();
+    let mut menu = menu
+        .min_w(px(MENU_WIDTH))
+        .label(name.clone())
+        .when(s.rights.connection_info, |m| {
+            m.item(row("activity", "Connection info...", colors().muted).on_click(admin(super::AdminTab::Server)))
+        })
+        .item(row("link", "Copy invite link", colors().muted).on_click(move |_, _, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string(invite_link(&address)));
+        }));
+    if !banshee {
+        menu = menu
+            .item(row("eye", "Subscribe to all channels", colors().muted).on_click(send(|con| Cmd::Admin {
+                con,
+                action: AdminAction::SubscribeAll { on: true },
+            })))
+            .item(row("eye-off", "Unsubscribe from all channels", colors().muted).on_click(send(|con| Cmd::Admin {
+                con,
+                action: AdminAction::SubscribeAll { on: false },
+            })));
+    }
+    menu = menu
+        .item(row("chevrons-down-up", "Collapse all", colors().muted).on_click(fold(true)))
+        .item(row("chevrons-up-down", "Expand all", colors().muted).on_click(fold(false)))
+        .separator()
+        .item(row("folder-plus", "Create channel...", colors().muted).on_click(move |_, w, cx| {
+            let _ = view.update(cx, |v, cx| v.open_channel_editor(con, None, 0, String::new(), w, cx));
+        }))
+        .item(row("mail", "Offline messages...", colors().muted).on_click(admin(super::AdminTab::Inbox(None))))
+        .item(row("key-round", "Use a privilege key...", colors().muted).on_click({
+            move |_, w, cx| use_key(PromptKind::UseKey, name.clone(), String::new(), w, cx)
+        }));
+    // only the pages our rights open
+    let r = &s.rights;
+    let pages = [
+        (r.edit_server, "settings-2", "Edit server...", super::AdminTab::Server),
+        (r.server_groups, "users", "Server groups...", super::AdminTab::ServerGroups),
+        (r.channel_groups, "users-round", "Channel groups...", super::AdminTab::ChannelGroups),
+        (r.keys, "key-round", "Privilege keys...", super::AdminTab::Keys),
+        (r.bans, "ban", "Bans...", super::AdminTab::Bans),
+        (r.complaints, "flag", "Complaints...", super::AdminTab::Complaints),
+        (r.log, "scroll-text", "Server log...", super::AdminTab::Log),
+    ];
+    if pages.iter().any(|(ok, ..)| *ok) {
+        menu = menu.separator().label("Administration");
+        for (ok, ic, text, tab) in pages {
+            if ok {
+                menu = menu.item(row(ic, text, colors().muted).on_click(admin(tab)));
+            }
+        }
+    }
+    menu.separator()
+        .item(row("unplug", "Disconnect", colors().red).on_click(send(Cmd::Disconnect)))
+}
+
+/// A saved server in the sidebar: the server menu while connected, and
+/// what's saved about it.
+pub fn bookmark_menu(
+    menu: PopupMenu,
+    bookmark: &crate::config::Bookmark,
+    con: Option<ConId>,
+    model: &Entity<Model>,
+    view: &WeakEntity<MainView>,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenu {
+    let mut menu = match con {
+        Some(con) => server_menu(menu, con, model, view, cx).separator(),
+        None => {
+            let (m, b) = (model.clone(), bookmark.clone());
+            menu.min_w(px(MENU_WIDTH))
+                .label(if bookmark.label.is_empty() { bookmark.address.clone() } else { bookmark.label.clone() })
+                .item(row("plug", "Connect", colors().muted).on_click(move |_, _, cx| m.read(cx).net.send(Cmd::Connect(b.clone()))))
+                .item(row("link", "Copy invite link", colors().muted).on_click({
+                    let link = invite_link(&bookmark.address);
+                    move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(link.clone()))
+                }))
+                .separator()
+        }
+    };
+    let id = bookmark.id.clone();
+    let auto = bookmark.auto_connect;
+    menu = menu
+        .label("Saved server")
+        .item(row("pencil", "Edit server...", colors().muted).on_click({
+            let (m, id) = (model.clone(), id.clone());
+            move |_, _, cx| super::edit_bookmark(&m, &id, cx)
+        }))
+        .item(
+            row(if auto { "square-check" } else { "square" }, "Connect on start", colors().muted).on_click({
+                let (m, id) = (model.clone(), id.clone());
+                move |_, _, cx| {
+                    m.update(cx, |m, cx| {
+                        m.update_settings(cx, |s| {
+                            if let Some(b) = s.bookmarks.iter_mut().find(|b| b.id == id) {
+                                b.auto_connect = !auto;
+                            }
+                        })
+                    })
+                }
+            }),
+        );
+    let (view, name) = (view.clone(), if bookmark.label.is_empty() { bookmark.address.clone() } else { bookmark.label.clone() });
+    menu.item(row("trash", "Remove server...", colors().red).on_click(move |_, w, cx| {
+        let (id, name) = (id.clone(), name.clone());
+        let _ = view.update(cx, |v, cx| {
+            v.open_prompt(PromptKind::RemoveServer, con.unwrap_or(0), 0, name, String::new(), w, cx);
+            if let Some(p) = &mut v.prompt {
+                p.key = id;
+            }
+        });
     }))
 }
 
@@ -584,11 +797,27 @@ pub fn channel_menu(
         let (m, n) = (model.clone(), ch.name.clone());
         move |_, _, cx| super::open_admin(&m, con, super::AdminTab::Files(id, n.clone()), cx)
     }))
-    .item(row("lock-keyhole", "Permissions...", colors().muted).on_click({
+    .when(model.read(cx).snap.server(con).is_some_and(|s| s.rights.permissions), |menu| menu.item(row("lock-keyhole", "Permissions...", colors().muted).on_click({
         let (m, title) = (model.clone(), format!("Channel {}", ch.name));
         move |_, _, cx| super::open_admin(&m, con, super::AdminTab::Perms(PermTarget::Channel(id), title.clone()), cx)
-    }))
+    })))
     .item(row("folder-plus", "Create sub-channel...", colors().muted).on_click(editor(None)))
+    .item(row("plus", "Create channel next to it...", colors().muted).on_click({
+        let (view, parent) = (view.clone(), ch.parent);
+        let parent_name = model
+            .read(cx)
+            .snap
+            .servers
+            .iter()
+            .find(|s| s.con == con)
+            .and_then(|s| s.channels.iter().find(|c| c.id == parent))
+            .map(|c| c.name.clone())
+            .unwrap_or_default();
+        move |_, w, cx| {
+            let parent_name = parent_name.clone();
+            let _ = view.update(cx, |v, cx| v.open_channel_editor(con, None, parent, parent_name, w, cx));
+        }
+    }))
     .item(row("pencil", "Rename...", colors().muted).on_click(ask(PromptKind::RenameChannel, name.clone())))
     .item(row("text-quote", "Set topic...", colors().muted).on_click(ask(PromptKind::SetTopic, topic)))
     .item(

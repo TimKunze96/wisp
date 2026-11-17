@@ -12,7 +12,11 @@ env:
   CMAKE_POLICY_VERSION_MINIMUM: "3.5"
 
 jobs:
+  ffmpeg:
+    uses: ./.github/workflows/ffmpeg.yml
+
   publish:
+    needs: ffmpeg
     permissions:
       contents: write
     strategy:
@@ -45,7 +49,15 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc g++ clang cmake pkg-config libasound2-dev libfontconfig-dev \
-            libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libssl-dev libzstd-dev libvulkan1
+            libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libssl-dev libzstd-dev libvulkan1 libpipewire-0.3-dev \
+            libva2 libva-drm2
+          # 22.04's PipeWire headers (0.3.48) are too old for the bindings; 24.04's
+          # are new enough, and everything we call exists in 0.3.48, so the binary
+          # still runs on 22.04 (only the headers change, not the library)
+          for p in libpipewire-0.3-dev libspa-0.2-dev; do
+            curl -sSfLO "http://archive.ubuntu.com/ubuntu/pool/main/p/pipewire/${p}_1.0.5-1_amd64.deb"
+          done
+          sudo dpkg -i --force-depends libpipewire-0.3-dev_1.0.5-1_amd64.deb libspa-0.2-dev_1.0.5-1_amd64.deb
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -61,11 +73,23 @@ jobs:
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
+      - name: Bundle ffmpeg
+        uses: actions/download-artifact@v8
+        with:
+          name: ffmpeg-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release
+
       - name: Package
         shell: bash
         run: |
-          cargo packager --release --target ${{ matrix.target }} \
-            --formats ${{ matrix.formats }} --out-dir dist
+          chmod +x target/${{ matrix.target }}/release/wisp-ffmpeg* || true
+          # macOS signing asks Apple's timestamp server, which sometimes doesn't answer
+          for attempt in 1 2 3; do
+            cargo packager --release --target ${{ matrix.target }} \
+              --formats ${{ matrix.formats }} --out-dir dist && break
+            [ "$attempt" = 3 ] && exit 1
+            sleep 20
+          done
 
       - name: Read version
         id: version
@@ -89,6 +113,8 @@ jobs:
             linux-*) gzip -9 -c dist/*.AppImage > "update/$name.AppImage.gz" ;;
             windows-*)
               gzip -9 -c "target/${{ matrix.target }}/release/wisp.exe" > "update/$name.exe.gz"
+              # the updater only swaps wisp.exe; Wisp fetches this when it's missing
+              gzip -9 -c "target/${{ matrix.target }}/release/wisp-ffmpeg.exe" > "update/$name-ffmpeg.exe.gz"
               ;;
           esac
 
@@ -143,7 +169,8 @@ jobs:
             --argjson macos_x86_64 "$(entry macos-x86_64)" \
             --argjson linux_x86_64 "$(entry linux-x86_64)" \
             --argjson windows_x86_64 "$(entry windows-x86_64)" \
-            '{$version, files: {"macos-aarch64": $macos_aarch64, "macos-x86_64": $macos_x86_64, "linux-x86_64": $linux_x86_64, "windows-x86_64": $windows_x86_64}}' \
+            --argjson windows_x86_64_ffmpeg "$(entry windows-x86_64-ffmpeg)" \
+            '{$version, files: {"macos-aarch64": $macos_aarch64, "macos-x86_64": $macos_x86_64, "linux-x86_64": $linux_x86_64, "windows-x86_64": $windows_x86_64, "windows-x86_64-ffmpeg": $windows_x86_64_ffmpeg}}' \
             > latest.json
           cat latest.json
           umask 077

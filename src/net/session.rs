@@ -50,6 +50,8 @@ pub(crate) fn placeholder(con: ConId, b: &Bookmark) -> ServerSnap {
         transfers: Vec::new(),
         banner: None,
         host_button: None,
+        screens: false,
+        rights: Default::default(),
     }
 }
 
@@ -98,6 +100,8 @@ struct Session {
     transfers: files::Transfers,
     next_transfer: u64,
     inspect: Option<u16>,
+    /// Our permission values the server sends for the UI, by permission id.
+    needed: HashMap<u32, i32>,
     inspect_vars_sent: Option<u16>,
     last_stats: Option<Instant>,
     volumes_applied: HashMap<u16, f32>,
@@ -163,6 +167,7 @@ pub(crate) async fn run(
         transfers: Default::default(),
         next_transfer: 1,
         inspect: None,
+        needed: HashMap::new(),
         inspect_vars_sent: None,
         last_stats: None,
         volumes_applied: HashMap::new(),
@@ -320,6 +325,7 @@ impl Session {
                             kind: crate::notify::EventKind::PrivateMessage,
                             title: "Offline messages".into(),
                             body: text,
+                            watch: None,
                         }));
                     }
                 }
@@ -329,6 +335,7 @@ impl Session {
         let mut tick = tokio::time::interval(Duration::from_millis(100));
         loop {
             let mut heard: Vec<(u16, bool)> = Vec::new();
+            let mut needed: Vec<(u32, i32)> = Vec::new();
             let mut book_changed = false;
             let mut messages = Vec::new();
             let mut downloads = Vec::new();
@@ -406,6 +413,9 @@ impl Session {
                             kicked = true;
                             events.push((EventKind::MovedOrKicked, title, why));
                         }
+                    }
+                    StreamItem::MessageEvent(InMessage::ClientNeededPermissions(m)) => {
+                        needed.extend(m.iter().map(|p| (p.permission_id.0, p.permission_value.unwrap_or(0))));
                     }
                     StreamItem::MessageEvent(msg) => {
                         queries.collect(&msg);
@@ -578,6 +588,7 @@ impl Session {
                         self.inspect_vars_sent = None;
                         self.last_stats = None;
                     }
+                    Some(SessionCmd::Share(_) | SessionCmd::ShareSwitch(_) | SessionCmd::Watch(..) | SessionCmd::WatchQuality(..) | SessionCmd::StreamVolume(..)) => {}
                     Some(SessionCmd::ChannelDescription(id)) => {
                         if let Some(c) = con.get_state()?.channels.get(&ChannelId(id)) {
                             let _ = c.description().to_packet().send(&mut con);
@@ -655,6 +666,10 @@ impl Session {
                 None => {}
             }
             let now = Instant::now();
+            if !needed.is_empty() {
+                self.needed.extend(needed);
+                book_changed = true;
+            }
             for (from, whisper) in heard {
                 self.last_voice.insert(from, now);
                 if whisper {
@@ -957,7 +972,7 @@ impl Session {
     }
 
     fn event(&self, kind: EventKind, title: String, body: String) {
-        let _ = self.back.send(SessionMsg::Event(self.con_id, crate::notify::Event { kind, title, body }));
+        let _ = self.back.send(SessionMsg::Event(self.con_id, crate::notify::Event { kind, title, body, watch: None }));
     }
 
     fn report_changes(&mut self, state: &data::Connection) {
@@ -1144,6 +1159,36 @@ impl Session {
         }
     }
 
+    /// What we may manage, from the permission values the server sent.
+    fn rights(&self) -> crate::net::Rights {
+        // not told (yet): offer everything and let the server say no
+        let has = |name: &str| {
+            self.needed.is_empty() || super::admin::perm_id(name).and_then(|id| self.needed.get(&id)).is_some_and(|v| *v > 0)
+        };
+        crate::net::Rights {
+            edit_server: [
+                "b_virtualserver_modify_name",
+                "b_virtualserver_modify_welcomemessage",
+                "b_virtualserver_modify_maxclients",
+                "b_virtualserver_modify_password",
+                "b_virtualserver_modify_hostmessage",
+            ]
+            .iter()
+            .any(|p| has(p)),
+            server_groups: has("b_virtualserver_servergroup_create") || has("i_group_modify_power") || has("i_group_member_add_power"),
+            channel_groups: has("b_virtualserver_channelgroup_create") || has("i_group_modify_power"),
+            keys: has("b_virtualserver_token_list") || has("b_virtualserver_token_add"),
+            bans: has("b_client_ban_list") || has("b_client_ban_create"),
+            complaints: has("b_client_complain_list"),
+            log: has("b_virtualserver_log_view"),
+            permissions: has("i_permission_modify_power") || has("b_client_permissionoverview_view"),
+            temp_passwords: has("b_virtualserver_modify_temporary_passwords")
+                || has("b_virtualserver_modify_temporary_passwords_own"),
+            connection_info: has("b_virtualserver_connectioninfo_view"),
+            complain: true,
+        }
+    }
+
     fn snapshot(&self, con: &Connection) -> Result<ServerSnap> {
         let state = con.get_state()?;
         let transmitting = self.last_own_audio.is_some_and(|t| t.elapsed() < TALK_HOLD);
@@ -1233,6 +1278,7 @@ impl Session {
             transfers: self.transfers.borrow().clone(),
             banner: self.pictures.as_ref().and_then(|(b, _)| b.borrow().clone()),
             host_button: self.pictures.as_ref().and_then(|(_, b)| b.borrow().clone()),
+            rights: self.rights(),
             ..self.base.clone()
         })
     }
@@ -1279,6 +1325,7 @@ impl Session {
                         icon: (cl.icon.0 != 0).then(|| self.badge("", cl.icon.0)),
                         volume: self.settings.user_volumes.get(&uid).copied().unwrap_or(1.0),
                         locally_muted: self.settings.user_muted.contains(&uid),
+                        stream: None,
                         uid,
                     }
                 })
@@ -1586,6 +1633,10 @@ fn admin(con: &mut Connection, action: &AdminAction) -> Result<(tsclientlib::Mes
             let c = state.channels.get(&ChannelId(*channel)).ok_or_else(|| anyhow::anyhow!("channel is gone"))?;
             let what = if *on { format!("Subscribed to {}", c.name) } else { format!("Unsubscribed from {}", c.name) };
             (c.set_subscribed(*on), what)
+        }
+        AdminAction::SubscribeAll { on } => {
+            let what = if *on { "Subscribed to all channels" } else { "Unsubscribed from all channels" };
+            (state.server.set_subscribed(*on), what.to_string())
         }
         AdminAction::MoveChannel { channel, parent, after } => {
             let c = state.channels.get(&ChannelId(*channel)).ok_or_else(|| anyhow::anyhow!("channel is gone"))?;

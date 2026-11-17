@@ -39,6 +39,9 @@ const RIGHT_W: f32 = 320.;
 pub struct MainView {
     pub(super) model: Entity<Model>,
     pub(super) prompt: Option<Prompt>,
+    pub(super) share: Option<super::share_dialog::ShareDialog>,
+    /// The keyboard shortcut overview is open.
+    pub(super) shortcuts: bool,
     pub(super) chat: Entity<InputState>,
     /// Volume slider of the selected user, with their uid.
     volume: Option<(String, Entity<SliderState>)>,
@@ -61,6 +64,8 @@ pub struct MainView {
     pub(super) palette: Option<super::palette::Palette>,
     focus: gpui_kit::FocusHandle,
     cursor: Option<Cursor>,
+    /// The stream bar shows everyone in the channel, not just who shares.
+    bar_everyone: bool,
 }
 
 /// TeamSpeak spacer channels: `[spacer]`, `[cspacer]`, `[rspacer]`, `[*spacer]`,
@@ -230,6 +235,8 @@ impl MainView {
         Self {
             model,
             prompt: None,
+            share: None,
+            shortcuts: false,
             chat,
             volume: None,
             editor: None,
@@ -246,6 +253,7 @@ impl MainView {
             palette: None,
             focus,
             cursor: None,
+            bar_everyone: false,
         }
     }
 
@@ -261,6 +269,13 @@ impl MainView {
             cx.stop_propagation();
             return;
         }
+        // "?" only while not typing somewhere
+        if k.key == "f1" || (k.key_char.as_deref() == Some("?") && self.focus.is_focused(window)) {
+            self.shortcuts = !self.shortcuts;
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
         if self.focus.is_focused(window)
             && !k.modifiers.modified()
             && matches!(k.key.as_str(), "up" | "down" | "left" | "right" | "enter")
@@ -270,9 +285,13 @@ impl MainView {
             return;
         }
         if k.key == "escape" {
-            if self.palette.take().is_some() {
+            if std::mem::take(&mut self.shortcuts) {
+            } else if self.palette.take().is_some() {
             } else if self.prompt.take().is_some() {
             } else if self.editor.take().is_some() {
+            } else if self.share.take().is_some() {
+            } else if self.model.read(cx).staged.is_some() {
+                self.model.update(cx, |m, cx| m.stage(None, cx));
             } else if self.filtering {
                 self.filtering = false;
                 self.filter.update(cx, |i, cx| i.set_value("", window, cx));
@@ -460,6 +479,8 @@ impl MainView {
         let con = server.map(|s| s.con);
         let bookmark = b.clone();
         let name = if b.label.is_empty() { b.address.clone() } else { b.label.clone() };
+        let (view, model, saved) = (cx.entity().downgrade(), self.model.clone(), b.clone());
+        let live = con.filter(|_| connected);
         h_flex()
             .id(SharedString::from(format!("bm-{}", b.id)))
             .group("bm")
@@ -534,6 +555,7 @@ impl MainView {
                         })),
                 )
             })
+            .context_menu(move |menu, _, cx| super::menus::bookmark_menu(menu, &saved, live, &model, &view, cx))
     }
 
     fn self_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -611,6 +633,7 @@ impl MainView {
                 .child(footer_row())
                 .into_any_element();
         };
+        let staged = m.staged.filter(|k| k.0 == server.con).and_then(|k| m.feeds.get(&k)).cloned();
         v_flex()
             .flex_1()
             .min_w_0()
@@ -624,9 +647,26 @@ impl MainView {
                         .child(div().flex_1().child(Input::new(&self.filter).cleanable(true))),
                 )
             })
-            .child(self.tree(&server, cx))
+            .map(|d| {
+                match staged {
+                    Some(feed) => d.child(super::streams::stage(&self.model, &feed, cx)),
+                    None => d.child(self.tree(&server, cx)),
+                }
+            })
+            .when_some(self.stream_bar(&server, cx), |d, bar| d.child(bar))
             .child(self.talk_bar(cx))
             .into_any_element()
+    }
+
+    fn stream_bar(&self, s: &ServerSnap, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let view = cx.entity().downgrade();
+        let toggle = move |cx: &mut gpui_kit::App| {
+            let _ = view.update(cx, |v, cx| {
+                v.bar_everyone = !v.bar_everyone;
+                cx.notify();
+            });
+        };
+        super::streams::bar(&self.model, s, self.bar_everyone, toggle, cx)
     }
 
     fn server_header(&self, s: &ServerSnap, cx: &mut Context<Self>) -> impl IntoElement {
@@ -634,8 +674,17 @@ impl MainView {
         let name = if s.server_name.is_empty() { s.label.clone() } else { s.server_name.clone() };
         let details = format!("{} · {} {}", s.label, s.platform, s.version.split(' ').next().unwrap_or(""));
         let dot = || div().size(px(3.)).rounded_full().bg(rgb(colors().dim));
+        let (view, model) = (cx.entity().downgrade(), self.model.clone());
         header_row()
-            .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).truncate().child(name))
+            .child(
+                div()
+                    .id("server-name")
+                    .text_sm()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .truncate()
+                    .child(name)
+                    .context_menu(move |menu, _, cx| super::menus::server_menu(menu, con, &model, &view, cx)),
+            )
             .child(div().flex_1())
             .child(
                 h_flex()
@@ -683,12 +732,14 @@ impl MainView {
                         cx.notify();
                     })),
             )
-            .child({
+            .when_some(super::AdminTab::first(&s.rights), |d, tab| {
                 let model = self.model.clone();
-                icon_button("admin", "shield", colors().muted, false)
-                    .size(px(26.))
-                    .tooltip(|w, cx| Tooltip::new("Server admin").build(w, cx))
-                    .on_click(move |_, _, cx| super::open_admin(&model, con, super::AdminTab::ServerGroups, cx))
+                d.child(
+                    icon_button("admin", "shield", colors().muted, false)
+                        .size(px(26.))
+                        .tooltip(|w, cx| Tooltip::new("Server admin").build(w, cx))
+                        .on_click(move |_, _, cx| super::open_admin(&model, con, tab.clone(), cx)),
+                )
             })
             .child(
                 icon_button("new-channel", "folder-plus", colors().muted, false)
@@ -755,7 +806,14 @@ impl MainView {
                 }
             }
         }
-        div().id("tree").flex_1().overflow_y_scroll().child(col)
+        // the empty space below: right-click for the server menu
+        let (view, model, con) = (cx.entity().downgrade(), self.model.clone(), s.con);
+        let below = div()
+            .id("tree-below")
+            .flex_grow(1.)
+            .min_h(px(120.))
+            .context_menu(move |menu, _, cx| super::menus::server_menu(menu, con, &model, &view, cx));
+        v_flex().id("tree").flex_1().overflow_y_scroll().child(col).child(below)
     }
 
     /// The rows the tree shows, in order (collapsed channels and the filter
@@ -1131,6 +1189,22 @@ impl MainView {
             .when(cl.commander, |d| d.child(status("megaphone", colors().muted)))
             .when(cl.priority, |d| d.child(status("zap", colors().muted)))
             .when(cl.recording, |d| d.child(status("circle-dot", colors().red)))
+            .when(cl.stream.is_some(), |d| {
+                let model = self.model.clone();
+                d.child(
+                    div()
+                        .id(SharedString::from(format!("st-{con}-{id}")))
+                        .cursor_pointer()
+                        .tooltip(|w, cx| Tooltip::new("Sharing their screen").build(w, cx))
+                        .when(!cl.me, |d| {
+                            d.on_click(move |_, _, cx| {
+                                cx.stop_propagation();
+                                model.update(cx, |m, cx| m.stage(Some((con, id)), cx))
+                            })
+                        })
+                        .child(status("monitor-up", colors().accent)),
+                )
+            })
             .when(cl.away.is_some(), |d| d.child(status("moon", colors().dim)))
             .when_some(cl.talk_request.clone(), |d, msg| {
                 let tip = if msg.is_empty() { "Asks for talk power".to_string() } else { format!("Asks for talk power: {msg}") };
@@ -1198,6 +1272,16 @@ impl MainView {
                             }),
                     ),
             )
+            .when_some(snap.active_server().filter(|s| s.screens).map(|s| s.con), |d, con| {
+                let on = snap.active_server().and_then(|s| s.channels.iter().flat_map(|c| &c.clients).find(|c| c.me)).is_some_and(|c| c.stream.is_some());
+                d.child(
+                    icon_button("share", "monitor-up", if on { colors().accent } else { colors().muted }, on)
+                        .tooltip(move |w, cx| Tooltip::new(if on { "Switch what you share, or stop" } else { "Share your screen" }).build(w, cx))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.open_share(con, on, cx);
+                        })),
+                )
+            })
             .child({
                 let rec = snap.recording.clone();
                 let on = rec.is_some();
@@ -1568,8 +1652,8 @@ impl MainView {
     }
 }
 
-impl Render for MainView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+impl MainView {
+    fn content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let audio_error = self.model.read(cx).snap.audio_error.clone();
         let hint = self.chat_placeholder(cx);
         if hint != self.chat_hint {
@@ -1579,7 +1663,7 @@ impl Render for MainView {
         if self.drop_hint.is_some() && !cx.has_active_drag() {
             self.drop_hint = None;
         }
-        let overlay = self.prompt_overlay(cx).or_else(|| self.host_message(cx)).or_else(|| self.palette_overlay(cx));
+        let overlay = self.shortcuts_overlay(cx).or_else(|| self.prompt_overlay(cx)).or_else(|| self.share_overlay(cx)).or_else(|| self.host_message(cx)).or_else(|| self.palette_overlay(cx));
         let editor = self.editor.clone().map(|e| {
             div()
                 .absolute()
@@ -1613,5 +1697,19 @@ impl Render for MainView {
             .child(self.right(window, cx))
             .when_some(overlay, |d, o| d.child(o))
             .when_some(editor, |d, e| d.child(e))
+    }
+}
+
+impl Render for MainView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let title = {
+            let snap = &self.model.read(cx).snap;
+            match snap.active_server().map(|s| if s.server_name.is_empty() { s.label.clone() } else { s.server_name.clone() }) {
+                Some(name) if !name.is_empty() => format!("Wisp · {name}"),
+                _ => "Wisp".to_string(),
+            }
+        };
+        let content = self.content(window, cx).into_any_element();
+        super::frame::framed(title, content, window, cx)
     }
 }

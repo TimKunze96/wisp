@@ -74,6 +74,11 @@ pub struct Settings {
     pub echo_cancel: bool,
     /// Even out the loudness of the people we hear.
     pub auto_gain: bool,
+    /// The last screen share: picture height (0 for the screen's own),
+    /// frame rate, and whether its sound went along.
+    pub screen_height: u32,
+    pub screen_fps: u32,
+    pub screen_sound: bool,
     /// Turn other apps down while someone talks, to this fraction.
     pub ducking: bool,
     pub duck_level: f32,
@@ -138,6 +143,9 @@ impl Default for Settings {
             output_device: None,
             mic_volume: 1.0,
             output_volume: 1.0,
+            screen_height: 1080,
+            screen_fps: 30,
+            screen_sound: true,
             voice_mode: VoiceMode::PushToTalk,
             vad_threshold_db: -40.0,
             ptt_release_ms: 0,
@@ -161,6 +169,13 @@ impl Default for Settings {
             hotkeys: Default::default(),
             close_to_tray: true,
         }
+    }
+}
+
+impl Settings {
+    /// How the last screen share went, to start the next one the same way.
+    pub fn share_options(&self) -> crate::video::ShareOptions {
+        crate::video::ShareOptions { height: self.screen_height, fps: self.screen_fps, sound: self.screen_sound }
     }
 }
 

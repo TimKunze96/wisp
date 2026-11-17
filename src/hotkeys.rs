@@ -69,6 +69,10 @@ fn fire(binding: Binding, down: bool, net: &Handle) {
         Binding::Action(Action::ToggleDeafen) => {
             std::thread::spawn(|| crate::ctl::request("deafen"));
         }
+        Binding::Action(Action::ToggleShare) => {
+            std::thread::spawn(|| crate::ctl::request("share toggle"));
+        }
+        Binding::Action(Action::ToggleStreamSound) => ui(UiRequest::ToggleStreamSound),
     }
 }
 
@@ -80,11 +84,20 @@ pub enum Action {
     ToggleMute,
     ToggleDeafen,
     ShowWindow,
+    ToggleShare,
+    ToggleStreamSound,
 }
 
 impl Action {
-    pub const ALL: [Action; 5] =
-        [Action::PushToTalk, Action::ToggleTalk, Action::ToggleMute, Action::ToggleDeafen, Action::ShowWindow];
+    pub const ALL: [Action; 7] = [
+        Action::PushToTalk,
+        Action::ToggleTalk,
+        Action::ToggleMute,
+        Action::ToggleDeafen,
+        Action::ShowWindow,
+        Action::ToggleShare,
+        Action::ToggleStreamSound,
+    ];
 
     pub fn title(self) -> &'static str {
         match self {
@@ -93,6 +106,8 @@ impl Action {
             Action::ToggleMute => "Mute microphone",
             Action::ToggleDeafen => "Sound off",
             Action::ShowWindow => "Show Wisp",
+            Action::ToggleShare => "Share screen",
+            Action::ToggleStreamSound => "Stream sound",
         }
     }
 
@@ -103,6 +118,8 @@ impl Action {
             Action::ToggleMute => "Toggle your microphone",
             Action::ToggleDeafen => "Toggle all sound",
             Action::ShowWindow => "Bring the window up from the tray",
+            Action::ToggleShare => "Start sharing like last time, or stop",
+            Action::ToggleStreamSound => "Mute or unmute the streams you watch",
         }
     }
 
@@ -113,6 +130,8 @@ impl Action {
             Action::ToggleMute => "mic-off",
             Action::ToggleDeafen => "headphone-off",
             Action::ShowWindow => "app-window",
+            Action::ToggleShare => "monitor-up",
+            Action::ToggleStreamSound => "volume-x",
         }
     }
 
@@ -125,6 +144,8 @@ impl Action {
             Action::ToggleMute => ("mute", None),
             Action::ToggleDeafen => ("deafen", None),
             Action::ShowWindow => ("show", None),
+            Action::ToggleShare => ("share toggle", None),
+            Action::ToggleStreamSound => ("stream-sound", None),
         }
     }
 }

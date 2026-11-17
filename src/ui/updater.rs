@@ -51,6 +51,10 @@ fn on_tokio<T: Send + 'static>(f: impl Future<Output = T> + Send + 'static) -> f
 pub fn start(model: &Entity<Model>, cx: &mut App) {
     let model = model.downgrade();
     cx.spawn(async move |cx| {
+        #[cfg(windows)]
+        if let Ok(Err(e)) = on_tokio(update::ensure_ffmpeg()).await {
+            tracing::warn!("couldn't get the screen sharing encoder: {e}");
+        }
         loop {
             if let Ok(Ok(Some(release))) = on_tokio(update::check_for_update()).await {
                 let _ = model.update(cx, |m, cx| {

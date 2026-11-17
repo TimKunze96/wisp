@@ -217,3 +217,31 @@ pub fn chip(id: impl Into<gpui_kit::ElementId>, text: impl Into<SharedString>, o
         .hover(|d| d.bg(hover_bg()))
         .child(text.into())
 }
+
+/// A small square button with just an icon, and what it does on hover.
+pub fn icon_btn(
+    id: impl Into<gpui_kit::ElementId>,
+    name: &'static str,
+    color: u32,
+    tip: &'static str,
+) -> gpui_kit::Stateful<Div> {
+    use gpui_kit::{InteractiveElement, StatefulInteractiveElement};
+    div()
+        .id(id)
+        .size(px(28.))
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(5.))
+        .cursor_pointer()
+        .hover(|d| d.bg(hover_bg()))
+        .tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(tip).build(w, cx))
+        .child(icon(name, 15., color))
+}
+
+/// `icon_btn` for deleting something: red, and red on hover.
+pub fn danger_btn(id: impl Into<gpui_kit::ElementId>, tip: &'static str) -> gpui_kit::Stateful<Div> {
+    use gpui_kit::InteractiveElement;
+    icon_btn(id, "trash", colors().red, tip).hover(|d| d.bg(alpha(colors().red, 0x1a)))
+}

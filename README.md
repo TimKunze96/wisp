@@ -109,7 +109,13 @@ voice server you can run yourself: add a bookmark with the address
 `banshee://host:7700#fingerprint`. Voice, whispers, channel/server/private
 chat, pokes, roles (shown as server groups), kicks, bans and channel editing
 work there, and so do channel files, avatars, offline messages and the server
-log.
+log. You can also share your screen there, with its sound (the button next to
+Talk), and watch other people's screens in your channel: they show up in a bar
+under the channel tree, and a click puts one on the stage or in its own window.
+Streams go up to 4K at 60 frames a second; viewers get the quality their
+connection keeps up with. With `ffmpeg` installed, the graphics card encodes
+(NVIDIA, AMD, Intel, Apple); otherwise the CPU does, which is fine up to 1080p.
+Sharing sound works on Linux (PipeWire) and Windows 10 and newer.
 
 Windows and macOS builds are new and barely tested. Hotkeys are registered with
 the system there, and echo cancellation and lowering other apps are Linux-only
@@ -139,7 +145,8 @@ and Wisp refuses anything that doesn't match the key built into it.
 
 ## Building
 
-Needs Rust 1.88 or newer, CMake and a C compiler (for Opus).
+Needs Rust 1.88 or newer, CMake, a C and C++ compiler (for Opus and OpenH264)
+and, on Linux, the PipeWire headers (`libpipewire-0.3-dev`, for screen sharing).
 
 ```sh
 cargo build --release

@@ -3,22 +3,30 @@
 mod admin;
 mod bbcode;
 mod files_view;
+mod form;
+mod frame;
+mod pin;
 mod icons;
 mod palette;
+mod screen_view;
+mod streams;
 mod channel_edit;
 mod chat_view;
 pub mod colors;
 mod main_view;
 mod menus;
 mod settings;
+mod share_dialog;
+mod shortcuts;
 mod theme;
 mod updater;
 mod widgets;
+mod zoom;
 
 use futures::StreamExt;
 use futures::channel::mpsc::UnboundedReceiver;
 use gpui_kit::{
-    AnyWindowHandle, App, AppContext, Bounds, Context, Entity, WindowBounds, WindowOptions, px, size,
+    AnyWindowHandle, App, AppContext, Bounds, Context, Entity, px, size,
 };
 
 use crate::config::Settings;
@@ -43,6 +51,12 @@ pub struct Model {
     settings_view: Option<gpui_kit::WeakEntity<settings::SettingsView>>,
     admin_window: Option<AnyWindowHandle>,
     admin_view: Option<gpui_kit::WeakEntity<admin::AdminView>>,
+    /// Streams in their own window, one window each.
+    screen_windows: std::collections::HashMap<streams::FeedKey, AnyWindowHandle>,
+    /// Streams we show (thumbnail, stage, window), one feed each.
+    feeds: std::collections::HashMap<streams::FeedKey, Entity<streams::Feed>>,
+    /// The stream on the stage in the main window.
+    pub staged: Option<streams::FeedKey>,
     /// Current main window size, saved when it closes.
     pub main_size: Option<(f32, f32)>,
     /// A newer release and how far installing it got.
@@ -103,6 +117,9 @@ pub fn start(
         settings_view: None,
         admin_window: None,
         admin_view: None,
+        screen_windows: Default::default(),
+        feeds: Default::default(),
+        staged: None,
         main_size: None,
         update: None,
     });
@@ -118,6 +135,7 @@ pub fn start(
                         t.update(&snap);
                     }
                     m.snap = snap;
+                    m.sync_feeds(cx);
                     cx.notify();
                 })
             });
@@ -164,6 +182,12 @@ pub fn start(
                     }
                 }
                 UiRequest::Link(url) => open_link(&m, &url, cx),
+                UiRequest::Watch(con, client, name, true) => open_screen(&m, con, client, name, cx),
+                UiRequest::Watch(con, client, _, false) => {
+                    m.update(cx, |m, cx| m.stage(Some((con, client)), cx));
+                    open_main(&m, cx);
+                }
+                UiRequest::ToggleStreamSound => m.update(cx, |m, cx| m.toggle_stream_sound(cx)),
                 UiRequest::Quit => quit(&m, cx),
             });
         }
@@ -178,6 +202,7 @@ pub fn start(
             let is_main = m.main_window.is_some_and(|w| w.window_id() == id);
             if is_main {
                 m.main_window = None;
+                m.staged = None;
                 remember_size(m, cx);
             }
             if m.settings_window.is_some_and(|w| w.window_id() == id) {
@@ -186,6 +211,8 @@ pub fn start(
             if m.admin_window.is_some_and(|w| w.window_id() == id) {
                 m.admin_window = None;
             }
+            m.screen_windows.retain(|_, w| w.window_id() != id);
+            m.sync_feeds(cx);
             (is_main, m.settings.close_to_tray && m.tray.is_some() && !m.snap.servers.is_empty())
         });
         if is_main && !keep {
@@ -264,18 +291,14 @@ pub fn open_main(model: &Entity<Model>, cx: &mut App) {
             return;
         }
     }
-    let options = WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-            None,
-            {
-                let (w, h) = model.read(cx).settings.window_size.unwrap_or((1100., 760.));
-                size(px(w.max(640.)), px(h.max(420.)))
-            },
-            cx,
-        ))),
-        app_id: Some("wisp".into()),
-        ..Default::default()
-    };
+    let options = frame::window_options(Bounds::centered(
+        None,
+        {
+            let (w, h) = model.read(cx).settings.window_size.unwrap_or((1100., 760.));
+            size(px(w.max(640.)), px(h.max(420.)))
+        },
+        cx,
+    ));
     let m = model.clone();
     if let Ok((handle, _)) =
         gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| main_view::MainView::new(m, window, cx)))
@@ -288,6 +311,16 @@ pub use admin::AdminTab;
 
 /// The admin window for one server (reused, switched to `tab`).
 pub fn open_admin(model: &Entity<Model>, con: ConId, tab: AdminTab, cx: &mut App) {
+    // a page we can't use: the first one we can, or nothing
+    let rights = model.read(cx).snap.server(con).map(|s| s.rights.clone()).unwrap_or_default();
+    let tab = if tab.allowed(&rights) {
+        tab
+    } else {
+        match AdminTab::first(&rights) {
+            Some(t) => t,
+            None => return,
+        }
+    };
     let (window, view) = {
         let m = model.read(cx);
         (m.admin_window, m.admin_view.clone())
@@ -306,11 +339,7 @@ pub fn open_admin(model: &Entity<Model>, con: ConId, tab: AdminTab, cx: &mut App
             let _ = w.update(cx, |_, window, _| window.remove_window());
         }
     }
-    let options = WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(1000.), px(720.)), cx))),
-        app_id: Some("wisp".into()),
-        ..Default::default()
-    };
+    let options = frame::window_options(Bounds::centered(None, size(px(1000.), px(720.)), cx));
     let m = model.clone();
     if let Ok((handle, view)) =
         gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| admin::AdminView::new(m, con, tab, window, cx)))
@@ -320,6 +349,42 @@ pub fn open_admin(model: &Entity<Model>, con: ConId, tab: AdminTab, cx: &mut App
             m.admin_view = Some(view.downgrade());
         });
     }
+}
+
+/// A stream in its own window (brought to the front if it has one).
+pub fn open_screen(model: &Entity<Model>, con: ConId, client: u16, name: String, cx: &mut App) {
+    let key = (con, client);
+    if let Some(w) = model.read(cx).screen_windows.get(&key).copied()
+        && w.update(cx, |_, window, _| window.activate_window()).is_ok()
+    {
+        return;
+    }
+    let feed = model.update(cx, |m, cx| {
+        if m.staged == Some(key) {
+            m.staged = None;
+        }
+        m.open_feed(key, &name, cx)
+    });
+    let Some(feed) = feed else { return };
+    let options = frame::window_options(Bounds::centered(None, size(px(1280.), px(800.)), cx));
+    let m = model.clone();
+    if let Ok((handle, _)) =
+        gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| screen_view::ScreenView::new(m, feed, window, cx)))
+    {
+        model.update(cx, |m, cx| {
+            m.screen_windows.insert(key, handle);
+            m.sync_feeds(cx);
+        });
+    }
+}
+
+/// Settings, on the form for one saved server.
+pub fn edit_bookmark(model: &Entity<Model>, id: &str, cx: &mut App) {
+    open_settings(model, SettingsTab::Servers, cx);
+    let m = model.read(cx);
+    let Some(b) = m.settings.bookmarks.iter().find(|b| b.id == id).cloned() else { return };
+    let (Some(w), Some(view)) = (m.settings_window, m.settings_view.as_ref().and_then(|v| v.upgrade())) else { return };
+    let _ = w.update(cx, |_, window, cx| view.update(cx, |v, cx| v.edit(b, false, window, cx)));
 }
 
 pub fn open_settings(model: &Entity<Model>, tab: SettingsTab, cx: &mut App) {
@@ -336,11 +401,7 @@ pub fn open_settings(model: &Entity<Model>, tab: SettingsTab, cx: &mut App) {
             return;
         }
     }
-    let options = WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(900.), px(640.)), cx))),
-        app_id: Some("wisp".into()),
-        ..Default::default()
-    };
+    let options = frame::window_options(Bounds::centered(None, size(px(900.), px(640.)), cx));
     let m = model.clone();
     if let Ok((handle, view)) = gpui_kit::open_window(options, cx, |window, cx| {
         cx.new(|cx| settings::SettingsView::new(m, tab, window, cx))

@@ -53,6 +53,8 @@ pub enum AdminAction {
     MoveChannel { channel: u64, parent: u64, after: u64 },
     DeleteChannel { channel: u64 },
     Subscribe { channel: u64, on: bool },
+    /// Every channel of the server.
+    SubscribeAll { on: bool },
 }
 
 #[derive(Clone, Debug)]
@@ -178,6 +180,17 @@ pub enum Cmd {
     Record(Option<bool>),
     /// Whether the main window has focus (no chat popups then).
     Focused(bool),
+    /// Start or stop sharing our screen (Banshee servers).
+    /// None stops sharing.
+    Share { con: ConId, start: Option<crate::video::ShareStart> },
+    /// Share another screen or window in the running share.
+    ShareSwitch { con: ConId, source: crate::video::Source },
+    /// Watch someone's screen onto `screen`, or stop (None).
+    Watch { con: ConId, client: u16, screen: Option<crate::video::Screen>, quality: crate::video::Quality },
+    /// Change the quality of a screen we watch.
+    WatchQuality { con: ConId, client: u16, quality: crate::video::Quality },
+    /// How loud a screen we watch plays (0 mutes).
+    StreamVolume { con: ConId, client: u16, volume: f32 },
     /// Disconnect everything, then answer.
     Shutdown(oneshot::Sender<()>),
 }
@@ -247,6 +260,8 @@ pub struct ClientRow {
     pub talk_request: Option<String>,
     pub volume: f32,
     pub locally_muted: bool,
+    /// Sharing their screen: its layers and viewer count.
+    pub stream: Option<crate::video::StreamInfo>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -328,7 +343,31 @@ pub struct ServerSnap {
     /// (cached picture, link, tooltip).
     pub banner: Option<(PathBuf, String)>,
     pub host_button: Option<(PathBuf, String, String)>,
+    /// The server does screen sharing.
+    pub screens: bool,
+    /// What we may manage there.
+    pub rights: Rights,
 }
+
+/// What we may manage on a server, which decides the admin pages we see.
+/// All false until the server told us (and on servers without that page).
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct Rights {
+    pub edit_server: bool,
+    pub server_groups: bool,
+    pub channel_groups: bool,
+    pub keys: bool,
+    pub bans: bool,
+    pub complaints: bool,
+    pub log: bool,
+    /// Permission lists of channels and people, and what applies to them.
+    pub permissions: bool,
+    pub temp_passwords: bool,
+    pub connection_info: bool,
+    /// Complaining about someone (TeamSpeak only).
+    pub complain: bool,
+}
+
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ServerGroupInfo {
@@ -419,6 +458,11 @@ pub(crate) enum SessionCmd {
     CloseChat(ChatKind),
     Admin(AdminAction),
     ChannelDescription(u64),
+    Share(Option<crate::video::ShareStart>),
+    ShareSwitch(crate::video::Source),
+    Watch(u16, Option<crate::video::Screen>, crate::video::Quality),
+    WatchQuality(u16, crate::video::Quality),
+    StreamVolume(u16, f32),
 }
 
 #[derive(Clone)]
@@ -442,6 +486,13 @@ pub fn ptt_socket() -> PathBuf {
 }
 
 pub fn runtime_dir() -> PathBuf {
+    // macOS: $TMPDIR is set in Terminal but not over SSH or for every
+    // launcher, so the app and the command line could look in different places
+    if cfg!(target_os = "macos") {
+        let dir = crate::config::cache_dir();
+        let _ = std::fs::create_dir_all(&dir);
+        return dir;
+    }
     std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(std::env::temp_dir)
 }
 
@@ -826,6 +877,11 @@ impl Manager {
             Cmd::Write { con, write } => to(self, con, SessionCmd::Write(write)),
             Cmd::ServerInfo { con, reply } => to(self, con, SessionCmd::ServerInfo(reply)),
             Cmd::Files { con, cmd } => to(self, con, SessionCmd::Files(cmd)),
+            Cmd::Share { con, start } => to(self, con, SessionCmd::Share(start)),
+            Cmd::ShareSwitch { con, source } => to(self, con, SessionCmd::ShareSwitch(source)),
+            Cmd::Watch { con, client, screen, quality } => to(self, con, SessionCmd::Watch(client, screen, quality)),
+            Cmd::WatchQuality { con, client, quality } => to(self, con, SessionCmd::WatchQuality(client, quality)),
+            Cmd::StreamVolume { con, client, volume } => to(self, con, SessionCmd::StreamVolume(client, volume)),
             Cmd::FetchIcons { con, ids } => to(self, con, SessionCmd::FetchIcons(ids)),
             Cmd::SetAvatar(a) => {
                 for s in self.sessions.values() {

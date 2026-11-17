@@ -1,0 +1,99 @@
+name: Test build
+
+# Installers for trying a pull request before it's merged. Add the
+# "test build" label; every push afterwards builds again. The files land in
+# the run's artifacts only, never in a release, so nobody updates to them.
+on:
+  pull_request:
+    types: [labeled, synchronize]
+
+env:
+  CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+
+jobs:
+  ffmpeg:
+    if: contains(github.event.pull_request.labels.*.name, 'test build')
+    uses: ./.github/workflows/ffmpeg.yml
+
+  build:
+    needs: ffmpeg
+    if: contains(github.event.pull_request.labels.*.name, 'test build')
+    # on the job, so a skipped run (push and label at once) doesn't cancel a real one
+    concurrency:
+      group: test-build-${{ github.ref }}-${{ matrix.target }}
+      cancel-in-progress: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            formats: dmg
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+            formats: dmg
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            formats: appimage
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            formats: nsis
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies (Ubuntu only)
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc g++ clang cmake pkg-config libasound2-dev libfontconfig-dev \
+            libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libssl-dev libzstd-dev libvulkan1 libpipewire-0.3-dev \
+            libva2 libva-drm2
+          # 22.04's PipeWire headers (0.3.48) are too old for the bindings; 24.04's
+          # are new enough, and everything we call exists in 0.3.48, so the binary
+          # still runs on 22.04 (only the headers change, not the library)
+          for p in libpipewire-0.3-dev libspa-0.2-dev; do
+            curl -sSfLO "http://archive.ubuntu.com/ubuntu/pool/main/p/pipewire/${p}_1.0.5-1_amd64.deb"
+          done
+          sudo dpkg -i --force-depends libpipewire-0.3-dev_1.0.5-1_amd64.deb libspa-0.2-dev_1.0.5-1_amd64.deb
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --locked
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Bundle ffmpeg
+        uses: actions/download-artifact@v8
+        with:
+          name: ffmpeg-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release
+
+      - name: Package
+        shell: bash
+        run: |
+          chmod +x target/${{ matrix.target }}/release/wisp-ffmpeg* || true
+          # macOS signing asks Apple's timestamp server, which sometimes doesn't answer
+          for attempt in 1 2 3; do
+            cargo packager --release --target ${{ matrix.target }} \
+              --formats ${{ matrix.formats }} --out-dir dist && break
+            [ "$attempt" = 3 ] && exit 1
+            sleep 20
+          done
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wisp-${{ matrix.target }}
+          path: |
+            dist/*.dmg
+            dist/*.AppImage
+            dist/*-setup.exe
+          retention-days: 14

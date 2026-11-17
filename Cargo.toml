@@ -1,6 +1,6 @@
 [package]
 name = "wisp"
-version = "0.5.2"
+version = "0.6.0"
 edition = "2024"
 description = "Voice chat client for TeamSpeak 3 servers"
 license = "MIT"
@@ -37,20 +37,30 @@ flate2 = "1"
 sha2 = "0.10"
 crc32fast = "1"
 reqwest = { version = "0.13", default-features = false }
-banshee-client = { git = "https://github.com/TimKunze96/banshee", rev = "da0c19d780c4545a802380f8a6fa415fb7c32fd6" }
+openh264 = "0.9.10"
+banshee-client = { git = "https://github.com/TimKunze96/banshee", rev = "b27b1b421e9debbb07004621590b13e7500b0919" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = { version = "0.3.6", features = ["blocking"] }
-ashpd = { version = "0.13", default-features = false, features = ["async-io", "global_shortcuts"] }
+ashpd = { version = "0.13", default-features = false, features = ["async-io", "global_shortcuts", "screencast"] }
+pipewire = "0.10.1"
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
+raw-window-handle = "0.6.2"
 tray-icon = "0.26"
 global-hotkey = "0.9"
 notify-rust = "4"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+screencapturekit = { version = "11.1.2", features = ["macos_14_0"] }
+apple-cf = { version = "0.11", default-features = false, features = ["cg"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSGraphics", "NSResponder", "NSView", "NSWindow"] }
+
 [target.'cfg(windows)'.dependencies]
+xcap = "0.9.10"
+wasapi = "0.27.0"
 winreg = "0.56"
-windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
 
 [build-dependencies]
 winresource = "0.1"
@@ -64,7 +74,8 @@ publisher = "Tim Kunze"
 homepage = "https://github.com/TimKunze96/wisp"
 license-file = "LICENSE"
 category = "SocialNetworking"
-binaries = [{ path = "wisp", main = true }]
+# wisp-ffmpeg: built by packaging/ffmpeg/build.sh into the target folder
+binaries = [{ path = "wisp", main = true }, { path = "wisp-ffmpeg" }]
 icons = [
     "assets/icons/32x32.png",
     "assets/icons/128x128.png",
@@ -77,12 +88,17 @@ deep-link-protocols = [{ schemes = ["ts3server"] }]
 [package.metadata.packager.macos]
 # Ad-hoc signature; there is no Developer ID certificate.
 signing-identity = "-"
-minimum-system-version = "11.0"
+# ScreenCaptureKit
+minimum-system-version = "12.3"
 info-plist-path = "packaging/macos/Info.plist"
+
+[package.metadata.packager.appimage]
+# the system's own: they talk to its PipeWire daemon and graphics drivers
+excluded-libraries = ["libpipewire*", "libva*", "libdrm*"]
 
 [package.metadata.packager.deb]
 # libvulkan1 is loaded at runtime, the rest is linked
-depends = ["libxcb1", "libxkbcommon0", "libxkbcommon-x11-0", "libasound2", "libvulkan1"]
+depends = ["libxcb1", "libxkbcommon0", "libxkbcommon-x11-0", "libasound2", "libpipewire-0.3-0", "libvulkan1", "libva2", "libva-drm2"]
 
 [package.metadata.packager.nsis]
 installer-icon = "assets/icons/wisp.ico"
