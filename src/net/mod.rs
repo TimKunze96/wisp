@@ -345,7 +345,29 @@ pub struct ServerSnap {
     pub host_button: Option<(PathBuf, String, String)>,
     /// The server does screen sharing.
     pub screens: bool,
+    /// What we may manage there.
+    pub rights: Rights,
 }
+
+/// What we may manage on a server, which decides the admin pages we see.
+/// All false until the server told us (and on servers without that page).
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct Rights {
+    pub edit_server: bool,
+    pub server_groups: bool,
+    pub channel_groups: bool,
+    pub keys: bool,
+    pub bans: bool,
+    pub complaints: bool,
+    pub log: bool,
+    /// Permission lists of channels and people, and what applies to them.
+    pub permissions: bool,
+    pub temp_passwords: bool,
+    pub connection_info: bool,
+    /// Complaining about someone (TeamSpeak only).
+    pub complain: bool,
+}
+
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ServerGroupInfo {

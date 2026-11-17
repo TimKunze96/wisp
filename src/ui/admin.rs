@@ -8,7 +8,6 @@ use std::time::Duration;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Sizable, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
@@ -18,6 +17,7 @@ use gpui_kit::{
 use tokio::sync::oneshot;
 
 use super::Model;
+use super::form;
 use super::widgets::*;
 use crate::net::admin::{
     AdminWrite, Answer, Ban, Complaint, GroupKind, Member, OfflineMessage, PermTarget, PermValue, Query, ServerInfo,
@@ -60,6 +60,54 @@ impl AdminTab {
             AdminTab::Overview(.., name) => format!("{name}: effective"),
         }
     }
+    /// Whether these rights open the page. Files and the inbox are for
+    /// everyone; the server checks what's inside.
+    pub fn allowed(&self, r: &crate::net::Rights) -> bool {
+        match self {
+            AdminTab::ServerGroups => r.server_groups,
+            AdminTab::ChannelGroups => r.channel_groups,
+            AdminTab::Bans => r.bans,
+            AdminTab::Keys => r.keys,
+            AdminTab::Complaints => r.complaints,
+            AdminTab::Server => r.edit_server || r.temp_passwords || r.connection_info,
+            AdminTab::Log => r.log,
+            AdminTab::Perms(..) | AdminTab::Overview(..) => r.permissions,
+            AdminTab::Files(..) | AdminTab::Inbox(_) => true,
+        }
+    }
+
+    /// The first admin page these rights open, if any.
+    pub fn first(r: &crate::net::Rights) -> Option<AdminTab> {
+        [
+            AdminTab::Server,
+            AdminTab::ServerGroups,
+            AdminTab::ChannelGroups,
+            AdminTab::Keys,
+            AdminTab::Bans,
+            AdminTab::Complaints,
+            AdminTab::Log,
+        ]
+        .into_iter()
+        .find(|t| t.allowed(r))
+    }
+
+    /// What the page is about, under its title.
+    fn about(&self) -> Option<&'static str> {
+        Some(match self {
+            AdminTab::ServerGroups => "Roles across the whole server, and what each may do",
+            AdminTab::ChannelGroups => "Roles inside a channel, like channel admin",
+            AdminTab::Bans => "Who can't come in, and until when",
+            AdminTab::Keys => "One-time tokens that hand out a role",
+            AdminTab::Complaints => "What people reported about others",
+            AdminTab::Server => "Name, welcome message, limits and passwords",
+            AdminTab::Log => "What happened on the server lately",
+            AdminTab::Inbox(_) => "Messages people left for you",
+            AdminTab::Perms(..) => "Every permission and its value here",
+            AdminTab::Files(..) => "Upload, download and tidy up",
+            AdminTab::Overview(..) => "What applies to them here, and which role it comes from",
+        })
+    }
+
     fn icon(&self) -> &'static str {
         match self {
             AdminTab::ServerGroups => "shield",
@@ -116,22 +164,7 @@ fn value(e: &Entity<InputState>, cx: &App) -> String {
 }
 
 fn error_box(e: &str) -> AnyElement {
-    div().px_3().py_2().rounded(px(6.)).bg(alpha(colors().red, 0x14)).child(label(e.to_string()).text_color(rgb(colors().red))).into_any_element()
-}
-
-fn icon_btn(id: impl Into<gpui_kit::ElementId>, name: &'static str, color: u32, tip: &'static str) -> gpui_kit::Stateful<gpui_kit::Div> {
-    div()
-        .id(id)
-        .size(px(28.))
-        .flex_none()
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(5.))
-        .cursor_pointer()
-        .hover(|d| d.bg(hover_bg()))
-        .tooltip(move |w, cx| Tooltip::new(tip).build(w, cx))
-        .child(icon(name, 14., color))
+    form::notice("triangle-alert", colors().red, e.to_string()).into_any_element()
 }
 
 fn human(secs: Option<u64>) -> String {
@@ -790,10 +823,11 @@ impl AdminView {
         let form = v_flex()
             .gap_2()
             .p_4()
-            .rounded(px(6.))
+            .rounded(px(8.))
             .border_1()
             .border_color(border())
-            .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("Add a ban"))
+            .bg(form::card_bg())
+            .child(h_flex().gap_2().items_center().child(icon("ban", 14., colors().muted)).child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("Add a ban")))
             .child(h_flex().gap_2().child(div().flex_1().child(Input::new(&self.ban_ip))).child(div().flex_1().child(Input::new(&self.ban_name))))
             .child(Input::new(&self.ban_uid))
             .child(Input::new(&self.ban_reason))
@@ -928,10 +962,11 @@ impl AdminView {
         let create = v_flex()
             .gap_3()
             .p_4()
-            .rounded(px(6.))
+            .rounded(px(8.))
             .border_1()
             .border_color(border())
-            .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("Create a key"))
+            .bg(form::card_bg())
+            .child(h_flex().gap_2().items_center().child(icon("key-round", 14., colors().muted)).child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("Create a key")))
             .child(label("Whoever uses the key joins this group."))
             .child(pick)
             .when(matches!(self.key_group, Some((false, _))), |d| d.child(label("In channel")).child(chan_pick))
@@ -1148,19 +1183,13 @@ impl AdminView {
 
     fn server_tab(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let Some(info) = self.info.clone() else { return label("Loading...").into_any_element() };
-        let row = |text: &'static str, el: AnyElement| {
-            h_flex()
-                .gap_4()
-                .items_center()
-                .min_h(px(32.))
-                .child(div().w(px(190.)).flex_none().text_sm().text_color(rgb(colors().muted)).child(text))
-                .child(div().flex_1().min_w_0().child(el))
-        };
-        let mut form = v_flex().gap_2();
+        let mut fields = form::Group::new("settings-2", "Settings").action(
+            Button::new("srv-save").label("Save").small().primary().on_click(cx.listener(|t, _, window, cx| t.save_server(window, cx))),
+        );
         for (key, text, _) in SERVER_FIELDS {
-            form = form.child(row(text, Input::new(&self.srv[key]).into_any_element()));
+            fields = fields.child(form::field(text, Input::new(&self.srv[key])));
             if key == "hostmessage" {
-                let mut modes = h_flex().gap_2();
+                let mut modes = h_flex().gap_2().flex_wrap();
                 for (i, m) in ["Off", "In the log", "Popup", "Popup, then disconnect"].into_iter().enumerate() {
                     let i = i as u8;
                     modes = modes.child(chip(("hm", i as usize), m, self.host_mode == i).on_click(cx.listener(move |t, _, _, cx| {
@@ -1168,14 +1197,14 @@ impl AdminView {
                         cx.notify();
                     })));
                 }
-                form = form.child(row("Host message shows", modes.into_any_element()));
+                fields = fields.child(form::field("Host message shows", modes));
             }
         }
         let mut temp = v_flex();
         match &self.temp {
-            None => temp = temp.child(label("Loading...")),
-            Some(Err(e)) => temp = temp.child(error_box(e)),
-            Some(Ok(t)) if t.is_empty() => temp = temp.child(label("No temporary passwords.")),
+            None => temp = temp.child(form::block(label("Loading..."))),
+            Some(Err(e)) => temp = temp.child(form::block(error_box(e))),
+            Some(Ok(t)) if t.is_empty() => temp = temp.child(form::block(label("No temporary passwords."))),
             Some(Ok(t)) => {
                 for (i, p) in t.iter().enumerate() {
                     let pw = p.password.clone();
@@ -1183,7 +1212,8 @@ impl AdminView {
                         h_flex()
                             .gap_3()
                             .items_center()
-                            .py_1p5()
+                            .px_4()
+                            .py_2()
                             .child(div().flex_1().text_sm().child(format!("{} · {}", p.password, p.description)))
                             .child(label(format!("until {} · {}", p.ends, p.by)))
                             .child(icon_btn(("tpd", i), "x", colors().muted, "Remove").on_click(cx.listener(move |t, _, window, cx| {
@@ -1202,13 +1232,7 @@ impl AdminView {
             }
         }
         let stat = |name: &'static str, value: String| {
-            h_flex()
-                .justify_between()
-                .py_1()
-                .border_b_1()
-                .border_color(alpha(ink(), 0x08))
-                .child(label(name))
-                .child(div().text_sm().child(value))
+            h_flex().justify_between().px_4().py_2().child(label(name)).child(div().text_sm().child(value))
         };
         let bytes = |n: u64| match n {
             n if n >= 1 << 30 => format!("{:.1} GB", n as f64 / (1u64 << 30) as f64),
@@ -1216,9 +1240,10 @@ impl AdminView {
             n => format!("{:.0} KB", n as f64 / 1024.0),
         };
         let connection = match &self.connection {
-            None => label("Loading...").into_any_element(),
-            Some(Err(e)) => error_box(e),
+            None => form::block(label("Loading...")).into_any_element(),
+            Some(Err(e)) => form::block(error_box(e)).into_any_element(),
             Some(Ok(c)) => v_flex()
+                .py_1()
                 .child(stat("Uptime", fmt_duration(c.uptime_secs)))
                 .child(stat("Ping (us to the server)", format!("{:.0} ms", c.ping_ms)))
                 .child(stat("Packet loss", format!("{:.1}%", c.packet_loss)))
@@ -1228,25 +1253,24 @@ impl AdminView {
                 .child(stat("File transfers (out / in)", format!("{} / {}", bytes(c.files_sent_total), bytes(c.files_received_total))))
                 .into_any_element(),
         };
+        let rights = self.server(cx).map(|s| s.rights.clone()).unwrap_or_default();
         v_flex()
             .gap_6()
             .max_w(px(760.))
-            .child(label(format!("{} {} · created {}", info.platform, info.version, info.created)))
-            .child(v_flex().gap_2().child(section_title("Connection")).child(connection))
-            .child(form)
-            .child(
-                h_flex().justify_end().child(
-                    Button::new("srv-save").label("Save").small().primary().on_click(cx.listener(|t, _, window, cx| t.save_server(window, cx))),
-                ),
-            )
-            .child(
-                v_flex()
-                    .gap_3()
-                    .child(section_title("Temporary passwords"))
-                    .child(label("Extra server passwords that expire after a day; handy for guests."))
+            .when(rights.connection_info, |d| d.child(
+                form::Group::new("activity", "Status")
+                    .hint(format!("{} {} · created {}", info.platform, info.version, info.created))
+                    .child(connection),
+            ))
+            .when(rights.edit_server, |d| d.child(fields))
+            .when(rights.temp_passwords, |d| d.child(
+                form::Group::new("key-round", "Temporary passwords")
+                    .hint("Extra server passwords that expire after a day; handy for guests.")
                     .child(
                         h_flex()
                             .gap_2()
+                            .px_4()
+                            .py_3()
                             .child(div().flex_1().child(Input::new(&self.temp_pw)))
                             .child(div().flex_1().child(Input::new(&self.temp_desc)))
                             .child(Button::new("tp-add").label("Add").small().on_click(cx.listener(|t, _, window, cx| {
@@ -1268,7 +1292,7 @@ impl AdminView {
                             }))),
                     )
                     .child(temp),
-            )
+            ))
             .into_any_element()
     }
 
@@ -1414,10 +1438,11 @@ impl AdminView {
         let compose = v_flex()
             .gap_2()
             .p_4()
-            .rounded(px(6.))
+            .rounded(px(8.))
             .border_1()
             .border_color(border())
-            .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("New offline message"))
+            .bg(form::card_bg())
+            .child(h_flex().gap_2().items_center().child(icon("mail", 14., colors().muted)).child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("New offline message")))
             .child(label("They get it the next time they connect, even if they're offline now."))
             .child(Input::new(&self.compose_to))
             .child(Input::new(&self.compose_subject))
@@ -1599,40 +1624,39 @@ impl AdminView {
             .bg(rgb(colors().sidebar))
             .border_r_1()
             .border_color(border())
-            .child(header_row().child(div().text_sm().font_weight(FontWeight::SEMIBOLD).truncate().child(server.unwrap_or_else(|| "Server".into()))))
-            .child(div().h(px(8.)));
-        let mut tabs = vec![
-            AdminTab::ServerGroups,
-            AdminTab::ChannelGroups,
-            AdminTab::Bans,
-            AdminTab::Keys,
-            AdminTab::Complaints,
-            AdminTab::Server,
-            AdminTab::Log,
-            AdminTab::Inbox(None),
+            .child(header_row().child(
+                h_flex()
+                    .gap_2()
+                    .min_w_0()
+                    .items_center()
+                    .child(icon("server", 14., colors().muted))
+                    .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).truncate().child(server.unwrap_or_else(|| "Server".into()))),
+            ));
+        let rights = self.server(cx).map(|s| s.rights.clone()).unwrap_or_default();
+        let mut sections: Vec<(&'static str, Vec<AdminTab>)> = vec![
+            ("Roles", vec![AdminTab::ServerGroups, AdminTab::ChannelGroups, AdminTab::Keys]),
+            ("Moderation", vec![AdminTab::Bans, AdminTab::Complaints, AdminTab::Log]),
+            ("Server", vec![AdminTab::Server, AdminTab::Inbox(None)]),
         ];
         if let AdminTab::Perms(..) | AdminTab::Files(..) | AdminTab::Overview(..) = &self.tab {
-            tabs.push(self.tab.clone());
+            sections.push(("Open", vec![self.tab.clone()]));
         }
-        for (i, tab) in tabs.into_iter().enumerate() {
-            let on = self.tab == tab || (matches!(self.tab, AdminTab::Inbox(_)) && matches!(tab, AdminTab::Inbox(_)));
-            let (title, ic) = (tab.title(), tab.icon());
-            col = col.child(
-                h_flex()
-                    .id(("atab", i))
-                    .h(px(32.))
-                    .mx_2()
-                    .gap_3()
-                    .px_3()
-                    .rounded(px(6.))
-                    .cursor_pointer()
-                    .items_center()
-                    .when(on, |d| d.bg(active_bg()))
-                    .hover(|d| d.bg(hover_bg()))
-                    .on_click(cx.listener(move |t, _, window, cx| t.switch(tab.clone(), window, cx)))
-                    .child(icon(ic, 15., if on { colors().text } else { colors().muted }))
-                    .child(div().text_sm().truncate().text_color(rgb(if on { colors().text } else { colors().soft })).child(title)),
-            );
+        let mut i: usize = 0;
+        for (heading, tabs) in sections {
+            let tabs: Vec<_> = tabs.into_iter().filter(|t| t.allowed(&rights)).collect();
+            if tabs.is_empty() {
+                continue;
+            }
+            col = col.child(form::nav_heading(heading));
+            for tab in tabs {
+                let on = self.tab == tab || (matches!(self.tab, AdminTab::Inbox(_)) && matches!(tab, AdminTab::Inbox(_)));
+                let (title, ic) = (tab.title(), tab.icon());
+                col = col.child(
+                    form::nav_item(("atab", i), ic, title, on)
+                        .on_click(cx.listener(move |t, _, window, cx| t.switch(tab.clone(), window, cx))),
+                );
+                i += 1;
+            }
         }
         col
     }
@@ -1640,9 +1664,11 @@ impl AdminView {
 
 impl AdminView {
     fn content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let connected = self.server(cx).is_some();
-        let body = if !connected {
+        let rights = self.server(cx).map(|s| s.rights.clone());
+        let body = if rights.is_none() {
             label("Not connected to this server anymore.").into_any_element()
+        } else if !rights.as_ref().is_some_and(|r| self.tab.allowed(r)) {
+            form::notice("lock-keyhole", colors().muted, "You can't manage this on this server.").into_any_element()
         } else {
             match self.tab.clone() {
                 AdminTab::ServerGroups | AdminTab::ChannelGroups => self.groups_tab(cx),
@@ -1674,17 +1700,18 @@ impl AdminView {
                     .flex_1()
                     .h_full()
                     .min_w_0()
-                    .child(header_row().child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(self.tab.title())))
                     .child(
                         div()
                             .id("admin-body")
                             .flex_1()
                             .overflow_y_scroll()
-                            .px_6()
-                            .py_5()
+                            .px_8()
+                            .pt_6()
+                            .pb_10()
                             .child(
                                 v_flex()
-                                    .gap_4()
+                                    .gap_5()
+                                    .child(form::page_header(self.tab.icon(), self.tab.title(), self.tab.about().map(Into::into)))
                                     .when_some(self.error.clone(), |d, e| d.child(error_box(&e)))
                                     .child(body),
                             ),

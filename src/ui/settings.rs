@@ -14,6 +14,7 @@ use gpui_kit::{
 };
 
 use super::Model;
+use super::form::{self, Group, block, card, field, item, notice};
 use super::widgets::*;
 use crate::audio::{DeviceInfo, list_devices};
 use crate::config::{Bookmark, Settings, VoiceMode, WhisperList, WhisperTarget, new_id};
@@ -52,6 +53,19 @@ impl SettingsTab {
             SettingsTab::General => "General",
         }
     }
+    /// What the page is about, under its title.
+    fn about(self) -> &'static str {
+        match self {
+            SettingsTab::Audio => "Your microphone, your speakers and how you talk",
+            SettingsTab::Servers => "The servers you go to and how you join them",
+            SettingsTab::Hotkeys => "Keys that work anywhere, even with Wisp in the background",
+            SettingsTab::Whisper => "Talk to some people or channels without leaving yours",
+            SettingsTab::Identities => "Who servers know you as",
+            SettingsTab::Notifications => "Sounds and popups for what happens on a server",
+            SettingsTab::General => "Window, startup and help when something breaks",
+        }
+    }
+
     fn icon(self) -> &'static str {
         match self {
             SettingsTab::Audio => "audio-lines",
@@ -120,8 +134,6 @@ pub struct SettingsView {
     taken: Vec<(String, String)>,
     hotkey_error: Option<String>,
 }
-
-const LABEL_W: f32 = 180.;
 
 impl SettingsView {
     pub fn new(model: Entity<Model>, tab: SettingsTab, window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -273,8 +285,13 @@ impl SettingsView {
         let m = self.model.read(cx);
         let bookmarks = m.settings.bookmarks.clone();
         let servers = m.snap.servers.clone();
-        let mut list = v_flex().border_1().border_color(border()).rounded(px(6.)).overflow_hidden();
-        for (i, b) in bookmarks.iter().enumerate() {
+        let mut list = Group::new("bookmark", "Saved servers")
+            .hint("Servers show up in the sidebar. Click one there to connect.")
+            .action(Button::new("add").label("Add server").small().primary().on_click(cx.listener(|t, _, window, cx| {
+                let nick = t.model.read(cx).settings.bookmarks.first().map(|b| b.nickname.clone()).unwrap_or_default();
+                t.edit(Bookmark { id: new_id(), nickname: nick, ..Default::default() }, true, window, cx)
+            })));
+        for b in bookmarks.iter() {
             let name = if b.label.is_empty() { b.address.clone() } else { b.label.clone() };
             let server = servers.iter().find(|s| s.bookmark == b.id);
             let online = server.is_some_and(|s| s.status == Status::Connected);
@@ -289,16 +306,15 @@ impl SettingsView {
                 h_flex()
                     .id(SharedString::from(format!("srv-{}", b.id)))
                     .gap_3()
-                    .px_3()
-                    .py_2p5()
+                    .px_4()
+                    .py_3()
                     .items_center()
-                    .when(i > 0, |d| d.border_t_1().border_color(border()))
                     .hover(|d| d.bg(hover_bg()))
                     .child(
                         div()
-                            .size(px(32.))
+                            .size(px(34.))
                             .flex_none()
-                            .rounded(px(6.))
+                            .rounded(px(8.))
                             .bg(rgb(colors().raised))
                             .flex()
                             .items_center()
@@ -337,42 +353,18 @@ impl SettingsView {
                             .ghost()
                             .on_click(cx.listener(move |t, _, window, cx| t.edit(edit_b.clone(), false, window, cx))),
                     )
-                    .child(
-                        div()
-                            .id(SharedString::from(format!("d-{}", b.id)))
-                            .size(px(28.))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded(px(5.))
-                            .cursor_pointer()
-                            .hover(|d| d.bg(alpha(colors().red, 0x1f)))
-                            .tooltip(|w, cx| Tooltip::new("Remove server").build(w, cx))
-                            .on_click(cx.listener(move |t, _, _, cx| {
-                                let id = del_id.clone();
-                                t.model.update(cx, |m, cx| m.update_settings(cx, |s| s.bookmarks.retain(|b| b.id != id)));
-                            }))
-                            .child(icon("trash", 14., colors().muted)),
-                    ),
+                    .child(danger_btn(SharedString::from(format!("d-{}", b.id)), "Remove server").on_click(cx.listener(
+                        move |t, _, _, cx| {
+                            let id = del_id.clone();
+                            t.model.update(cx, |m, cx| m.update_settings(cx, |s| s.bookmarks.retain(|b| b.id != id)));
+                        },
+                    ))),
             );
         }
         if bookmarks.is_empty() {
-            list = list.child(div().px_3().py_4().child(label("No servers yet. Add one to get started.")));
+            list = list.child(block(label("No servers yet. Add one to get started.")));
         }
-        v_flex()
-            .gap_4()
-            .child(
-                h_flex()
-                    .items_center()
-                    .justify_between()
-                    .child(label("Servers show up in the sidebar. Click one there to connect."))
-                    .child(Button::new("add").label("Add server").small().on_click(cx.listener(|t, _, window, cx| {
-                        let nick = t.model.read(cx).settings.bookmarks.first().map(|b| b.nickname.clone()).unwrap_or_default();
-                        t.edit(Bookmark { id: new_id(), nickname: nick, ..Default::default() }, true, window, cx)
-                    }))),
-            )
-            .child(list)
-            .into_any_element()
+        list.into_any_element()
     }
 
     fn server_form(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -407,74 +399,72 @@ impl SettingsView {
                 cx.notify();
             })));
         }
-        let row = |name: &'static str, el: AnyElement| {
-            h_flex()
-                .gap_4()
-                .items_center()
-                .child(div().w(px(LABEL_W)).flex_none().text_sm().text_color(rgb(colors().muted)).child(name))
-                .child(div().flex_1().child(el))
-        };
         v_flex()
-            .gap_4()
-            .max_w(px(640.))
+            .gap_6()
             .child(
-                h_flex()
-                    .id("back")
-                    .gap_2()
-                    .items_center()
-                    .cursor_pointer()
-                    .text_sm()
-                    .text_color(rgb(colors().muted))
-                    .hover(|d| d.text_color(rgb(colors().text)))
-                    .on_click(cx.listener(|t, _, _, cx| {
-                        t.form = None;
-                        cx.notify();
-                    }))
-                    .child(icon("arrow-left", 14., colors().muted))
-                    .child("All servers"),
-            )
-            .child(div().text_lg().font_weight(FontWeight::SEMIBOLD).child(if is_new { "Add server" } else { "Edit server" }))
-            .child(row("Address", Input::new(&f.address).into_any_element()))
-            .child(row("Name", Input::new(&f.label).into_any_element()))
-            .child(row("Nickname", Input::new(&f.nickname).into_any_element()))
-            .when_some(f.error.clone(), |d, e| {
-                d.child(row("", div().text_sm().text_color(rgb(colors().red)).child(e).into_any_element()))
-            })
-            .child(row("Phonetic nickname", Input::new(&f.phonetic).into_any_element()))
-            .child(row("Server password", Input::new(&f.password).into_any_element()))
-            .child(row("Default channel", Input::new(&f.channel).into_any_element()))
-            .child(row("Voice mode", modes.into_any_element()))
-            .child(row(
-                "Notifications",
                 h_flex()
                     .gap_3()
                     .items_center()
-                    .child(Switch::new("bm-quiet").checked(!f.quiet).on_click(cx.listener(|t, v: &bool, _, cx| {
-                        if let Some(f) = &mut t.form {
-                            f.quiet = !*v;
-                        }
-                        cx.notify();
-                    })))
-                    .child(label("Sounds and popups for this server"))
-                    .into_any_element(),
-            ))
-            .when(self.identities.len() > 1, |d| d.child(row("Identity", idents.into_any_element())))
-            .child(row(
-                "Connect on start",
-                Switch::new("auto")
-                    .checked(auto)
-                    .on_click(cx.listener(|t, v: &bool, _, cx| {
-                        if let Some(f) = &mut t.form {
-                            f.auto_connect = *v;
-                        }
-                        cx.notify();
-                    }))
-                    .into_any_element(),
-            ))
+                    .child(
+                        div()
+                            .id("back")
+                            .size(px(30.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(6.))
+                            .cursor_pointer()
+                            .hover(|d| d.bg(hover_bg()))
+                            .tooltip(|w, cx| Tooltip::new("All servers").build(w, cx))
+                            .on_click(cx.listener(|t, _, _, cx| {
+                                t.form = None;
+                                cx.notify();
+                            }))
+                            .child(icon("arrow-left", 16., colors().muted)),
+                    )
+                    .child(div().text_lg().font_weight(FontWeight::SEMIBOLD).child(if is_new { "Add server" } else { "Edit server" })),
+            )
+            .child(
+                Group::new("server", "Server")
+                    .child(field("Address", Input::new(&f.address)))
+                    .child(field("Name", Input::new(&f.label)))
+                    .child(field("Server password", Input::new(&f.password)))
+                    .child(field("Default channel", Input::new(&f.channel))),
+            )
+            .child(
+                Group::new("user-round", "You")
+                    .child(field("Nickname", Input::new(&f.nickname)))
+                    .when_some(f.error.clone(), |d, e| d.child(notice("triangle-alert", colors().red, e).mx_4().my_2()))
+                    .child(field("Phonetic nickname", Input::new(&f.phonetic)))
+                    .when(self.identities.len() > 1, |d| d.child(field("Identity", idents))),
+            )
+            .child(
+                Group::new("sliders-horizontal", "Behavior")
+                    .child(field("Voice mode", modes))
+                    .child(item(
+                        "Notifications",
+                        Some("Sounds and popups for this server".into()),
+                        Switch::new("bm-quiet").checked(!f.quiet).on_click(cx.listener(|t, v: &bool, _, cx| {
+                            if let Some(f) = &mut t.form {
+                                f.quiet = !*v;
+                            }
+                            cx.notify();
+                        })),
+                    ))
+                    .child(item(
+                        "Connect on start",
+                        Some("When Wisp starts, it joins this server on its own".into()),
+                        Switch::new("auto").checked(auto).on_click(cx.listener(|t, v: &bool, _, cx| {
+                            if let Some(f) = &mut t.form {
+                                f.auto_connect = *v;
+                            }
+                            cx.notify();
+                        })),
+                    )),
+            )
             .child(
                 h_flex()
                     .gap_2()
-                    .pt_2()
                     .justify_end()
                     .child(Button::new("cancel").label("Cancel").small().ghost().on_click(cx.listener(|t, _, _, cx| {
                         t.form = None;
@@ -540,16 +530,7 @@ impl SettingsView {
                     .child(div().text_sm().truncate().text_color(rgb(if on { colors().text } else { colors().soft })).child(name)),
             );
         }
-        div()
-            .id(id)
-            .max_h(px(160.))
-            .overflow_y_scroll()
-            .p_1()
-            .border_1()
-            .border_color(border())
-            .rounded(px(6.))
-            .child(list)
-            .into_any_element()
+        div().id(id).max_h(px(168.)).overflow_y_scroll().p_1p5().child(list).into_any_element()
     }
 
     fn audio(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -591,78 +572,61 @@ impl SettingsView {
             .when(s.voice_mode == VoiceMode::VoiceActivation, |d| {
                 d.child(div().absolute().top_0().left(gpui_kit::relative(threshold)).w(px(2.)).h_full().bg(rgb(colors().amber)))
             });
+        let switch = |id: &'static str, on: bool, set: fn(&mut Settings, bool), cx: &mut Context<Self>| {
+            Switch::new(id).checked(on).on_click(cx.listener(move |t, v: &bool, _, cx| {
+                let v = *v;
+                t.model.update(cx, |m, cx| m.update_settings(cx, |s| set(s, v)));
+            }))
+        };
         v_flex()
-            .gap_8()
-            .max_w(px(640.))
-            .when(cfg!(not(target_os = "linux")), |d| d.child(label("A different device takes effect the next time Wisp starts.")))
+            .gap_6()
+            .when(cfg!(not(target_os = "linux")), |d| {
+                d.child(notice("info", colors().muted, "A different device takes effect the next time Wisp starts."))
+            })
             .child(
-                section("Microphone")
+                Group::new("mic", "Microphone")
                     .child(inputs)
-                    .child(setting_row(format!("Volume  {:.0}%", s.mic_volume * 100.), Slider::new(&self.mic)))
-                    .when(crate::audio::HAS_ECHO_CANCEL, |d| d.child(setting_row(
-                        "Echo cancellation",
-                        h_flex()
-                            .gap_3()
-                            .items_center()
-                            .child(Switch::new("echo").checked(s.echo_cancel).on_click(cx.listener(
-                                |t, v: &bool, _, cx| {
-                                    let v = *v;
-                                    t.model.update(cx, |m, cx| m.update_settings(cx, |s| s.echo_cancel = v));
-                                },
-                            )))
-                            .child(label("For speakers: keeps what Wisp plays out of your mic (WebRTC)")),
-                    )))
-                    .child(setting_row(
+                    .child(form::slider("Volume", format!("{:.0}%", s.mic_volume * 100.), Slider::new(&self.mic)))
+                    .child(field("Level", meter))
+                    .when(crate::audio::HAS_ECHO_CANCEL, |d| {
+                        d.child(item(
+                            "Echo cancellation",
+                            Some("For speakers: keeps what Wisp plays out of your mic (WebRTC)".into()),
+                            switch("echo", s.echo_cancel, |s, v| s.echo_cancel = v, cx),
+                        ))
+                    })
+                    .child(item(
                         "Noise suppression",
-                        h_flex()
-                            .gap_3()
-                            .items_center()
-                            .child(Switch::new("denoise").checked(s.noise_suppression).on_click(cx.listener(
-                                |t, v: &bool, _, cx| {
-                                    let v = *v;
-                                    t.model.update(cx, |m, cx| m.update_settings(cx, |s| s.noise_suppression = v));
-                                },
-                            )))
-                            .child(label(match &self.rnnoise_source {
-                                Some(src) => format!("Your microphone already goes through RNNoise ({src}), so Wisp leaves it alone"),
-                                None => "Filters out fans, keyboards and background hum (RNNoise)".into(),
-                            })),
-                    ))
-                    .child(setting_row("Level", meter)),
+                        Some(match &self.rnnoise_source {
+                            Some(src) => format!("Your microphone already goes through RNNoise ({src}), so Wisp leaves it alone").into(),
+                            None => "Filters out fans, keyboards and background hum (RNNoise)".into(),
+                        }),
+                        switch("denoise", s.noise_suppression, |s, v| s.noise_suppression = v, cx),
+                    )),
             )
             .child(
-                section("Speakers")
+                Group::new("volume-2", "Speakers")
                     .child(outputs)
-                    .child(setting_row(format!("Volume  {:.0}%", s.output_volume * 100.), Slider::new(&self.out)))
-                    .child(setting_row(
+                    .child(form::slider("Volume", format!("{:.0}%", s.output_volume * 100.), Slider::new(&self.out)))
+                    .child(item(
                         "Even out voices",
-                        h_flex()
-                            .gap_3()
-                            .items_center()
-                            .child(Switch::new("agc").checked(s.auto_gain).on_click(cx.listener(|t, v: &bool, _, cx| {
-                                let v = *v;
-                                t.model.update(cx, |m, cx| m.update_settings(cx, |s| s.auto_gain = v));
-                            })))
-                            .child(label("Turns quiet people up and loud ones down, on top of their own volume")),
+                        Some("Turns quiet people up and loud ones down, on top of their own volume".into()),
+                        switch("agc", s.auto_gain, |s, v| s.auto_gain = v, cx),
                     ))
-                    .when(crate::audio::HAS_DUCKING, |d| d.child(setting_row(
-                        "Lower other apps",
-                        h_flex()
-                            .gap_3()
-                            .items_center()
-                            .child(Switch::new("duck").checked(s.ducking).on_click(cx.listener(|t, v: &bool, _, cx| {
-                                let v = *v;
-                                t.model.update(cx, |m, cx| m.update_settings(cx, |s| s.ducking = v));
-                            })))
-                            .child(label("While someone talks, music and videos play quieter")),
-                    )))
+                    .when(crate::audio::HAS_DUCKING, |d| {
+                        d.child(item(
+                            "Lower other apps",
+                            Some("While someone talks, music and videos play quieter".into()),
+                            switch("duck", s.ducking, |s, v| s.ducking = v, cx),
+                        ))
+                    })
                     .when(crate::audio::HAS_DUCKING && s.ducking, |d| {
-                        d.child(setting_row(format!("Lower to  {:.0}%", s.duck_level * 100.), Slider::new(&self.duck)))
+                        d.child(form::slider("Lower them to", format!("{:.0}%", s.duck_level * 100.), Slider::new(&self.duck)))
                     }),
             )
             .child(
-                section("Voice")
-                    .child(setting_row(
+                Group::new("audio-lines", "Voice")
+                    .child(field(
                         "Mode",
                         h_flex()
                             .gap_2()
@@ -670,10 +634,10 @@ impl SettingsView {
                             .child(mode_btn("m-vad", "Voice activation", VoiceMode::VoiceActivation, cx)),
                     ))
                     .when(s.voice_mode == VoiceMode::VoiceActivation, |d| {
-                        d.child(setting_row(format!("Threshold  {:.0} dB", s.vad_threshold_db), Slider::new(&self.vad)))
+                        d.child(form::slider("Threshold", format!("{:.0} dB", s.vad_threshold_db), Slider::new(&self.vad)))
                     })
                     .when(s.voice_mode == VoiceMode::PushToTalk, |d| {
-                        d.child(setting_row(format!("Release delay  {} ms", s.ptt_release_ms), Slider::new(&self.release)))
+                        d.child(form::slider("Release delay", format!("{} ms", s.ptt_release_ms), Slider::new(&self.release)))
                     }),
             )
             .into_any_element()
@@ -726,7 +690,7 @@ impl SettingsView {
     fn hotkeys_tab(&self, cx: &mut Context<Self>) -> AnyElement {
         let set = self.model.read(cx).settings.hotkeys.clone();
         let external = hotkeys::external_ptt();
-        let mut list = v_flex().border_1().border_color(border()).rounded(px(6.)).overflow_hidden();
+        let mut list = Group::new("keyboard", "Actions");
         for (i, action) in Action::ALL.into_iter().enumerate() {
             let keys = set.get(&action).cloned().filter(|k| !k.is_empty());
             let recording = self.recording == Some(Rec::Action(action));
@@ -734,32 +698,21 @@ impl SettingsView {
                 .as_ref()
                 .and_then(|k| self.taken.iter().find(|(t, _)| *t == hotkeys::normalize(k)))
                 .map(|(_, d)| d.clone());
-            let chip = div()
-                .min_w(px(140.))
-                .h(px(30.))
-                .px_3()
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(5.))
-                .border_1()
-                .border_color(if recording { alpha(ink(), 0x55) } else { border() })
-                .bg(if recording { alpha(ink(), 0x14) } else { rgb(colors().raised) })
-                .text_sm()
-                .text_color(rgb(if keys.is_some() || recording { colors().text } else { colors().dim }))
-                .child(if recording {
-                    "Press a key...".to_string()
-                } else if keys.is_none() && action == Action::PushToTalk && external {
-                    "F13 (bindings.lua)".to_string()
-                } else {
-                    keys.clone().unwrap_or_else(|| "Not set".into())
-                });
+            let chip = key_chip(
+                match &keys {
+                    None if action == Action::PushToTalk && external => "F13 (bindings.lua)".into(),
+                    None => "Not set".into(),
+                    Some(k) => k.clone(),
+                },
+                keys.is_some(),
+                recording,
+            )
+            .min_w(px(140.));
             list = list.child(
                 v_flex()
-                    .px_3()
-                    .py_2p5()
+                    .px_4()
+                    .py_3()
                     .gap_1p5()
-                    .when(i > 0, |d| d.border_t_1().border_color(border()))
                     .child(
                         h_flex()
                             .gap_3()
@@ -786,19 +739,9 @@ impl SettingsView {
                                     })),
                             )
                             .child(
-                                div()
-                                    .id(SharedString::from(format!("clr-{i}")))
-                                    .size(px(28.))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .rounded(px(5.))
-                                    .cursor_pointer()
+                                icon_btn(SharedString::from(format!("clr-{i}")), "x", colors().muted, "Clear")
                                     .when(keys.is_none(), |d| d.invisible())
-                                    .hover(|d| d.bg(hover_bg()))
-                                    .tooltip(|w, cx| Tooltip::new("Clear").build(w, cx))
-                                    .on_click(cx.listener(move |t, _, _, cx| t.set_hotkey(Rec::Action(action), None, cx)))
-                                    .child(icon("x", 14., colors().muted)),
+                                    .on_click(cx.listener(move |t, _, _, cx| t.set_hotkey(Rec::Action(action), None, cx))),
                             ),
                     )
                     .when_some(conflict, |d, c| {
@@ -816,25 +759,15 @@ impl SettingsView {
         let included = hotkeys::included();
         v_flex()
             .gap_4()
-            .max_w(px(720.))
-            .child(label(hotkeys::about()))
             .when(!included, |d| {
-                d.child(
-                    h_flex()
-                        .gap_2()
-                        .items_center()
-                        .px_3()
-                        .py_2()
-                        .rounded(px(6.))
-                        .bg(alpha(colors().amber, 0x14))
-                        .child(icon("triangle-alert", 14., colors().amber))
-                        .child(label(format!("Add {} to ~/.config/hypr/hyprland.lua", hotkeys::INCLUDE_LINE)).text_color(rgb(colors().amber))),
-                )
+                d.child(notice(
+                    "triangle-alert",
+                    colors().amber,
+                    format!("Add {} to ~/.config/hypr/hyprland.lua", hotkeys::INCLUDE_LINE),
+                ))
             })
-            .when_some(self.hotkey_error.clone(), |d, e| {
-                d.child(div().px_3().py_2().rounded(px(6.)).bg(alpha(colors().red, 0x14)).child(label(e).text_color(rgb(colors().red))))
-            })
-            .child(list)
+            .when_some(self.hotkey_error.clone(), |d, e| d.child(notice("triangle-alert", colors().red, e)))
+            .child(list.hint(hotkeys::about()))
             .into_any_element()
     }
 
@@ -956,12 +889,9 @@ impl SettingsView {
                 }
             }
             col = col.child(
-                v_flex()
+                card()
                     .gap_3()
                     .p_4()
-                    .rounded(px(6.))
-                    .border_1()
-                    .border_color(border())
                     .child(
                         h_flex()
                             .gap_3()
@@ -1039,21 +969,13 @@ impl SettingsView {
         }
         v_flex()
             .gap_4()
-            .max_w(px(720.))
             .child(label(
                 "Your identity is who you are to a server: groups and permissions stick to it. Each server can \
                  use its own (Settings → Servers → Edit). Servers can require a minimum security level; \
                  raising it takes a while (each level about twice as long as the last).",
             ))
             .when_some(self.identity_note.clone(), |d, (note, bad)| {
-                d.child(
-                    div()
-                        .px_3()
-                        .py_2()
-                        .rounded(px(6.))
-                        .bg(if bad { alpha(colors().red, 0x14) } else { alpha(colors().green, 0x14) })
-                        .child(label(note).text_color(rgb(if bad { colors().red } else { colors().green }))),
-                )
+                d.child(if bad { notice("triangle-alert", colors().red, note) } else { notice("check", colors().green, note) })
             })
             .child(
                 h_flex()
@@ -1205,34 +1127,17 @@ impl SettingsView {
                     ),
                 );
             }
-            let key_chip = div()
-                .min_w(px(120.))
-                .h(px(30.))
-                .px_3()
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(5.))
-                .border_1()
-                .border_color(if recording { alpha(ink(), 0x55) } else { border() })
-                .bg(if recording { alpha(ink(), 0x14) } else { rgb(colors().raised) })
-                .text_sm()
-                .text_color(rgb(if !l.hotkey.is_empty() || recording { colors().text } else { colors().dim }))
-                .child(if recording {
-                    "Press a key...".to_string()
-                } else if l.hotkey.is_empty() {
-                    "No key".into()
-                } else {
-                    l.hotkey.clone()
-                });
+            let key_chip = key_chip(
+                if l.hotkey.is_empty() { "No key".into() } else { l.hotkey.clone() },
+                !l.hotkey.is_empty(),
+                recording,
+            )
+            .min_w(px(120.));
             let (rec_id, clear_id, del_id) = (id.clone(), id.clone(), id.clone());
             col = col.child(
-                v_flex()
+                card()
                     .gap_3()
                     .p_4()
-                    .rounded(px(6.))
-                    .border_1()
-                    .border_color(border())
                     .child(
                         h_flex()
                             .gap_3()
@@ -1253,42 +1158,18 @@ impl SettingsView {
                                     })),
                             )
                             .when(!l.hotkey.is_empty(), |d| {
-                                d.child(
-                                    div()
-                                        .id(SharedString::from(format!("wclr-{i}")))
-                                        .size(px(28.))
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .rounded(px(5.))
-                                        .cursor_pointer()
-                                        .hover(|d| d.bg(hover_bg()))
-                                        .tooltip(|w, cx| Tooltip::new("Clear key").build(w, cx))
-                                        .on_click(cx.listener(move |t, _, _, cx| {
-                                            t.set_hotkey(Rec::Whisper(clear_id.clone()), None, cx)
-                                        }))
-                                        .child(icon("x", 14., colors().muted)),
-                                )
+                                d.child(icon_btn(SharedString::from(format!("wclr-{i}")), "x", colors().muted, "Clear key").on_click(
+                                    cx.listener(move |t, _, _, cx| t.set_hotkey(Rec::Whisper(clear_id.clone()), None, cx)),
+                                ))
                             })
-                            .child(
-                                div()
-                                    .id(SharedString::from(format!("wdel-{i}")))
-                                    .size(px(28.))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .rounded(px(5.))
-                                    .cursor_pointer()
-                                    .hover(|d| d.bg(alpha(colors().red, 0x1a)))
-                                    .tooltip(|w, cx| Tooltip::new("Delete list").build(w, cx))
-                                    .on_click(cx.listener(move |t, _, _, cx| {
-                                        let id = del_id.clone();
-                                        t.whisper_names.remove(&id);
-                                        t.model.update(cx, |m, cx| m.update_settings(cx, |s| s.whisper_lists.retain(|l| l.id != id)));
-                                        t.apply_hotkeys(cx);
-                                    }))
-                                    .child(icon("trash", 14., colors().red)),
-                            ),
+                            .child(danger_btn(SharedString::from(format!("wdel-{i}")), "Delete list").on_click(cx.listener(
+                                move |t, _, _, cx| {
+                                    let id = del_id.clone();
+                                    t.whisper_names.remove(&id);
+                                    t.model.update(cx, |m, cx| m.update_settings(cx, |s| s.whisper_lists.retain(|l| l.id != id)));
+                                    t.apply_hotkeys(cx);
+                                },
+                            ))),
                     )
                     .when_some(conflict, |d, c| {
                         d.child(
@@ -1305,7 +1186,6 @@ impl SettingsView {
         }
         v_flex()
             .gap_4()
-            .max_w(px(720.))
             .child(
                 h_flex()
                     .gap_4()
@@ -1330,9 +1210,7 @@ impl SettingsView {
                         },
                     ))),
             )
-            .when_some(self.hotkey_error.clone(), |d, e| {
-                d.child(div().px_3().py_2().rounded(px(6.)).bg(alpha(colors().red, 0x14)).child(label(e).text_color(rgb(colors().red))))
-            })
+            .when_some(self.hotkey_error.clone(), |d, e| d.child(notice("triangle-alert", colors().red, e)))
             .child(col)
             .into_any_element()
     }
@@ -1344,6 +1222,7 @@ impl SettingsView {
             h_flex()
                 .gap_4()
                 .pb_1()
+                .pt_1()
                 .child(div().flex_1())
                 .child(div().w(px(60.)).text_xs().text_color(rgb(colors().dim)).child("Sound"))
                 .child(div().w(px(60.)).text_xs().text_color(rgb(colors().dim)).child("Popup"))
@@ -1404,36 +1283,29 @@ impl SettingsView {
             );
         }
         v_flex()
-            .gap_8()
-            .max_w(px(640.))
+            .gap_6()
             .child(
-                section("Sounds")
-                    .child(setting_row(format!("Volume  {:.0}%", s.sound_volume * 100.), Slider::new(&self.sounds)))
-                    .child(setting_row(
+                Group::new("volume-2", "Sounds")
+                    .child(form::slider("Volume", format!("{:.0}%", s.sound_volume * 100.), Slider::new(&self.sounds)))
+                    .child(item(
                         "Read events aloud",
-                        h_flex()
-                            .gap_3()
-                            .items_center()
-                            .child(
-                                Switch::new("speak")
-                                    .checked(s.speak_events)
-                                    .disabled(!self.can_speak)
-                                    .on_click(cx.listener(|t, v: &bool, _, cx| {
-                                        let v = *v;
-                                        t.model.update(cx, |m, cx| m.update_settings(cx, |s| s.speak_events = v));
-                                    })),
-                            )
-                            .child(label(if self.can_speak {
-                                "Says \"Alex poked you\" instead of playing the sound (espeak-ng)"
-                            } else {
-                                "Needs espeak-ng"
-                            })),
+                        Some(if self.can_speak {
+                            "Says \"Alex poked you\" instead of playing the sound (espeak-ng)".into()
+                        } else {
+                            "Needs espeak-ng".into()
+                        }),
+                        Switch::new("speak").checked(s.speak_events).disabled(!self.can_speak).on_click(cx.listener(
+                            |t, v: &bool, _, cx| {
+                                let v = *v;
+                                t.model.update(cx, |m, cx| m.update_settings(cx, |s| s.speak_events = v));
+                            },
+                        )),
                     )),
             )
             .child(
-                section("Events")
-                    .child(rows)
-                    .child(label("Chat popups are skipped while the Wisp window has focus.")),
+                Group::new("bell-ring", "Events")
+                    .child(block(rows))
+                    .hint("Chat popups are skipped while the Wisp window has focus."),
             )
             .into_any_element()
     }
@@ -1446,46 +1318,37 @@ impl SettingsView {
             None => theme_file.display().to_string(),
         };
         v_flex()
-            .gap_8()
-            .max_w(px(640.))
+            .gap_6()
+            .child(Group::new("palette", "Appearance").child(item(
+                "Theme",
+                Some(format!("Colors come from {theme_file} when it exists and change as soon as the file does.").into()),
+                div(),
+            )))
             .child(
-                section("Appearance").child(setting_row(
-                    "Theme",
-                    label(format!("Colors come from {theme_file} when it exists and change as soon as the file does.")),
-                )),
-            )
-            .child(
-                section("Window").child(setting_row(
-                    "Keep running in the tray",
-                    h_flex()
-                        .gap_3()
-                        .items_center()
-                        .child(Switch::new("tray").checked(tray).on_click(cx.listener(|t, v: &bool, _, cx| {
+                Group::new("app-window", "Window")
+                    .child(item(
+                        "Keep running in the tray",
+                        Some("Closing the window while connected keeps Wisp in the tray".into()),
+                        Switch::new("tray").checked(tray).on_click(cx.listener(|t, v: &bool, _, cx| {
                             let v = *v;
                             t.model.update(cx, |m, cx| m.update_settings(cx, |s| s.close_to_tray = v));
-                        })))
-                        .child(label("Closing the window while connected keeps Wisp in the tray")),
-                ))
-                .child(setting_row(
-                    "Start at login",
-                    h_flex()
-                        .gap_3()
-                        .items_center()
-                        .child(Switch::new("autostart").checked(crate::desktop::autostart()).on_click(cx.listener(
+                        })),
+                    ))
+                    .child(item(
+                        "Start at login",
+                        Some("Starts in the tray and connects to your auto-connect servers".into()),
+                        Switch::new("autostart").checked(crate::desktop::autostart()).on_click(cx.listener(
                             |_, v: &bool, _, cx| {
                                 crate::desktop::set_autostart(*v);
                                 cx.notify();
                             },
-                        )))
-                        .child(label("Starts in the tray and connects to your auto-connect servers")),
-                ))
-                .when(crate::desktop::CAN_SET_LINKS, |d| {
-                    d.child(setting_row(
-                        "Open ts3server:// links",
-                        h_flex()
-                            .gap_3()
-                            .items_center()
-                            .child(Switch::new("links").checked(crate::desktop::handles_links()).on_click(cx.listener(
+                        )),
+                    ))
+                    .when(crate::desktop::CAN_SET_LINKS, |d| {
+                        d.child(item(
+                            "Open ts3server:// links",
+                            Some("Join links from websites and chats open in Wisp".into()),
+                            Switch::new("links").checked(crate::desktop::handles_links()).on_click(cx.listener(
                                 |t, v: &bool, _, cx| {
                                     if *v {
                                         let before = crate::desktop::take_links();
@@ -1498,34 +1361,29 @@ impl SettingsView {
                                     }
                                     cx.notify();
                                 },
-                            )))
-                            .child(label("Join links from websites and chats open in Wisp")),
-                    ))
+                            )),
+                        ))
+                    }),
+            )
+            .child(Group::new("life-buoy", "Troubleshooting").child(item(
+                "Log file",
+                Some("Send wisp.log along when something doesn't work".into()),
+                Button::new("show-log").label("Show log").small().on_click(|_, _, cx| {
+                    if let Some(dir) = crate::log::path().parent() {
+                        cx.open_with_system(dir);
+                    }
                 }),
-            )
+            )))
             .child(
-                section("Troubleshooting").child(setting_row(
-                    "Log file",
-                    h_flex()
-                        .gap_3()
-                        .items_center()
-                        .child(Button::new("show-log").label("Show log").small().on_click(|_, _, cx| {
-                            if let Some(dir) = crate::log::path().parent() {
-                                cx.open_with_system(dir);
-                            }
-                        }))
-                        .child(label("Send wisp.log along when something doesn't work")),
-                )),
-            )
-            .child(
-                section("Command line").child(
-                    v_flex().gap_1().children(
+                Group::new("terminal", "Command line").child(block(
+                    v_flex().gap_1p5().children(
                         [
                             ("wisp status [--json | --bar]", "connection status"),
                             ("wisp connect <server>", "connect to a saved server"),
                             ("wisp disconnect [server | all]", "disconnect"),
                             ("wisp mute | deafen [on | off]", "microphone / sound"),
                             ("wisp ptt down | up", "push-to-talk"),
+                            ("wisp share [on | off | toggle]", "screen sharing"),
                             ("wisp join <channel>", "join a channel"),
                             ("wisp say <text>", "message your channel"),
                             ("wisp channel create | rename | topic | move | delete", "channel admin"),
@@ -1535,21 +1393,30 @@ impl SettingsView {
                         .map(|(c, d)| {
                             h_flex()
                                 .gap_4()
-                                .child(div().w(px(260.)).flex_none().text_sm().child(c))
+                                .child(
+                                    div()
+                                        .w(px(330.))
+                                        .flex_none()
+                                        .font_family("monospace")
+                                        .text_xs()
+                                        .text_color(rgb(colors().soft))
+                                        .child(c),
+                                )
                                 .child(label(d))
                         }),
                     ),
-                ),
+                )),
             )
             .into_any_element()
     }
 
     fn tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let c = colors();
         let mut col = v_flex()
-            .w(px(200.))
+            .w(px(210.))
             .flex_none()
             .h_full()
-            .bg(rgb(colors().sidebar))
+            .bg(rgb(c.sidebar))
             .border_r_1()
             .border_color(border())
             .child(header_row().child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("Settings")))
@@ -1563,41 +1430,21 @@ impl SettingsView {
             SettingsTab::Identities,
             SettingsTab::General,
         ] {
-            let on = self.tab == tab;
             col = col.child(
-                h_flex()
-                    .id(tab.title())
-                    .h(px(32.))
-                    .mx_2()
-                    .gap_3()
-                    .px_3()
-                    .rounded(px(6.))
-                    .cursor_pointer()
-                    .items_center()
-                    .when(on, |d| d.bg(active_bg()))
-                    .hover(|d| d.bg(hover_bg()))
-                    .on_click(cx.listener(move |t, _, window, cx| t.switch(tab, window, cx)))
-                    .child(icon(tab.icon(), 15., if on { colors().text } else { colors().muted }))
-                    .child(div().text_sm().text_color(rgb(if on { colors().text } else { colors().soft })).child(tab.title())),
+                form::nav_item(tab.title(), tab.icon(), tab.title(), self.tab == tab)
+                    .on_click(cx.listener(move |t, _, window, cx| t.switch(tab, window, cx))),
             );
         }
-        col
+        col.child(div().flex_1()).child(
+            h_flex()
+                .px_5()
+                .py_4()
+                .gap_2()
+                .items_center()
+                .child(mark(14.))
+                .child(label(format!("Wisp {}", env!("CARGO_PKG_VERSION")))),
+        )
     }
-}
-
-/// A settings section: small title over its content, no box around it.
-fn section(title: &'static str) -> gpui_kit::Div {
-    v_flex().gap_3().child(section_title(title))
-}
-
-/// Label on the left, control on the right, same label width everywhere.
-fn setting_row(text: impl Into<SharedString>, el: impl IntoElement) -> impl IntoElement {
-    h_flex()
-        .gap_4()
-        .items_center()
-        .min_h(px(30.))
-        .child(div().w(px(LABEL_W)).flex_none().text_sm().text_color(rgb(colors().muted)).child(text.into()))
-        .child(div().flex_1().child(el))
 }
 
 impl SettingsView {
@@ -1624,8 +1471,18 @@ impl SettingsView {
                     .flex_1()
                     .h_full()
                     .min_w_0()
-                    .child(header_row().child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(self.tab.title())))
-                    .child(div().id("settings-body").flex_1().overflow_y_scroll().px_6().py_5().child(body)),
+                    .child(
+                        div().id("settings-body").flex_1().overflow_y_scroll().child(
+                            v_flex()
+                                .max_w(px(760.))
+                                .px_8()
+                                .pt_6()
+                                .pb_10()
+                                .gap_6()
+                                .child(form::page_header(self.tab.icon(), self.tab.title(), Some(self.tab.about().into())))
+                                .child(body),
+                        ),
+                    ),
             )
     }
 }
@@ -1636,4 +1493,21 @@ impl Render for SettingsView {
         let content = self.content(window, cx).into_any_element();
         super::frame::framed(title, content, window, cx)
     }
+}
+
+/// The keys of a hotkey, or "Press a key..." while recording one.
+fn key_chip(text: String, set: bool, recording: bool) -> gpui_kit::Div {
+    div()
+        .h(px(30.))
+        .px_3()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(5.))
+        .border_1()
+        .border_color(if recording { alpha(ink(), 0x55) } else { border() })
+        .bg(if recording { alpha(ink(), 0x14) } else { rgb(colors().raised) })
+        .text_sm()
+        .text_color(rgb(if set || recording { colors().text } else { colors().dim }))
+        .child(if recording { "Press a key...".to_string() } else { text })
 }

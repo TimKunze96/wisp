@@ -3,6 +3,7 @@
 mod admin;
 mod bbcode;
 mod files_view;
+mod form;
 mod frame;
 mod pin;
 mod icons;
@@ -310,6 +311,16 @@ pub use admin::AdminTab;
 
 /// The admin window for one server (reused, switched to `tab`).
 pub fn open_admin(model: &Entity<Model>, con: ConId, tab: AdminTab, cx: &mut App) {
+    // a page we can't use: the first one we can, or nothing
+    let rights = model.read(cx).snap.server(con).map(|s| s.rights.clone()).unwrap_or_default();
+    let tab = if tab.allowed(&rights) {
+        tab
+    } else {
+        match AdminTab::first(&rights) {
+            Some(t) => t,
+            None => return,
+        }
+    };
     let (window, view) = {
         let m = model.read(cx);
         (m.admin_window, m.admin_view.clone())

@@ -176,6 +176,19 @@ fn server(con: u64, bookmark: &str, name: &str, channels: Vec<ChannelRow>, own: 
         banner: None,
         host_button: None,
         screens: false,
+        rights: crate::net::Rights {
+            edit_server: true,
+            server_groups: true,
+            channel_groups: true,
+            keys: true,
+            bans: true,
+            complaints: true,
+            log: true,
+            permissions: true,
+            temp_passwords: true,
+            connection_info: true,
+            complain: true,
+        },
     }
 }
 

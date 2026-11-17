@@ -474,17 +474,7 @@ pub fn zoom_button(feed: &Entity<Feed>, zoomed: bool) -> gpui_kit::Stateful<gpui
 }
 
 pub fn tool_button(id: &'static str, name: &'static str, tip: &'static str) -> gpui_kit::Stateful<gpui_kit::Div> {
-    div()
-        .id(id)
-        .size(px(28.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(5.))
-        .cursor_pointer()
-        .hover(|d| d.bg(hover_bg()))
-        .tooltip(move |w, cx| Tooltip::new(tip).build(w, cx))
-        .child(icon(name, 15., colors().muted))
+    icon_btn(id, name, colors().muted, tip)
 }
 
 const TILE_W: f32 = 176.;

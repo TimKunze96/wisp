@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use banshee_client::{
     Account, Channel, ChannelEdit, ChatTarget, Client, ClientMsg, Files, Identity, Key, Leave, NewChannel,
-    OfflineMessage, Options, Request, Role, ServerEdit, ServerInfo as Info, ServerMsg, User, UserId, Video, Watching,
+    OfflineMessage, Options, Perm, Request, Role, ServerEdit, ServerInfo as Info, ServerMsg, User, UserId, Video, Watching,
     Whisper, key_hex,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -304,6 +304,20 @@ impl Session {
     fn key_for(&self, d: u64) -> Option<Key> {
         let known = self.accounts.iter().map(|a| a.key).chain(self.users.values().map(|u| u.key));
         known.into_iter().find(|k| db_id(k) == d)
+    }
+
+    /// What our role lets us manage; Banshee has no channel groups,
+    /// complaints, permission lists, temporary passwords or connection stats.
+    fn rights(&self) -> crate::net::Rights {
+        let may = |p: Perm| self.me().and_then(|me| self.role(me.role)).is_some_and(|r| r.perms.contains(&p));
+        crate::net::Rights {
+            edit_server: may(Perm::ManageServer),
+            server_groups: may(Perm::ManageRoles),
+            keys: may(Perm::ManageRoles),
+            bans: may(Perm::Ban),
+            log: may(Perm::ManageServer),
+            ..Default::default()
+        }
     }
 
     fn role(&self, id: u32) -> Option<&Role> {
@@ -1145,6 +1159,7 @@ impl Session {
             })
             .collect();
         snap.own_channel = self.me().map(|u| u64::from(u.channel));
+        snap.rights = self.rights();
         snap.users = self.users.len();
         snap.groups = self
             .roles

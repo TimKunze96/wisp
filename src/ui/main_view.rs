@@ -732,12 +732,14 @@ impl MainView {
                         cx.notify();
                     })),
             )
-            .child({
+            .when_some(super::AdminTab::first(&s.rights), |d, tab| {
                 let model = self.model.clone();
-                icon_button("admin", "shield", colors().muted, false)
-                    .size(px(26.))
-                    .tooltip(|w, cx| Tooltip::new("Server admin").build(w, cx))
-                    .on_click(move |_, _, cx| super::open_admin(&model, con, super::AdminTab::ServerGroups, cx))
+                d.child(
+                    icon_button("admin", "shield", colors().muted, false)
+                        .size(px(26.))
+                        .tooltip(|w, cx| Tooltip::new("Server admin").build(w, cx))
+                        .on_click(move |_, _, cx| super::open_admin(&model, con, tab.clone(), cx)),
+                )
             })
             .child(
                 icon_button("new-channel", "folder-plus", colors().muted, false)
