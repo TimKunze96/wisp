@@ -9,7 +9,7 @@ use futures::prelude::*;
 use tokio::task::LocalSet;
 use tokio::time::{self, Duration};
 use tokio_stream::wrappers::IntervalStream;
-use tracing::{debug, error};
+use tracing::error;
 use tsclientlib::ClientId;
 use tsproto_packets::packets::InAudioBuf;
 
@@ -96,6 +96,8 @@ impl TsToAudio {
     }
 
     fn start(t2a: Arc<Mutex<Self>>, local_set: &LocalSet) {
+        // retried every second: log each new problem once, not each try
+        let mut failing: Option<String> = None;
         local_set.spawn_local(
             IntervalStream::new(time::interval(Duration::from_secs(1))).for_each(move |_| {
                 let mut t2a = t2a.lock().unwrap();
@@ -103,9 +105,17 @@ impl TsToAudio {
                     match t2a.open_playback() {
                         Ok(s) => {
                             t2a.stream = Some(s);
-                            debug!("Opened playback device");
+                            if failing.take().is_some() {
+                                tracing::info!("Opened playback device");
+                            }
                         }
-                        Err(error) => error!(%error, "Failed to open playback device"),
+                        Err(error) => {
+                            let error = error.to_string();
+                            if failing.as_ref() != Some(&error) {
+                                error!(%error, "Failed to open playback device");
+                                failing = Some(error);
+                            }
+                        }
                     }
                 }
                 future::ready(())

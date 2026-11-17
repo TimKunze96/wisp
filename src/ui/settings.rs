@@ -78,6 +78,7 @@ struct BookmarkForm {
     voice_mode: Option<VoiceMode>,
     identity: Option<String>,
     quiet: bool,
+    error: Option<String>,
 }
 
 /// A running security level search.
@@ -224,13 +225,14 @@ impl SettingsView {
             label: field(b.label, "Shown in the sidebar (optional)", false, window, cx),
             address: field(b.address, "ts.example.com or ts.example.com:9987", false, window, cx),
             password: field(b.password, "Leave empty if there is none", true, window, cx),
-            nickname: field(b.nickname, "Your name on this server", false, window, cx),
+            nickname: field(b.nickname, "Your name on this server, 3 to 30 characters", false, window, cx),
             phonetic: field(b.phonetic, "How text-to-speech says it (optional)", false, window, cx),
             channel: field(b.channel, "e.g. Lobby/Games (optional)", false, window, cx),
             auto_connect: b.auto_connect,
             voice_mode: b.voice_mode,
             identity: b.identity,
             quiet: b.quiet,
+            error: None,
         });
         self.identities = crate::identity::load_all();
         cx.notify();
@@ -253,6 +255,15 @@ impl SettingsView {
             quiet: f.quiet,
         };
         if b.address.is_empty() {
+            return None;
+        }
+        // TeamSpeak refuses the connect with "invalid parameter size" otherwise
+        let len = b.nickname.chars().count();
+        if !crate::net::is_banshee(&b.address) && !b.nickname.is_empty() && !(3..=30).contains(&len) {
+            if let Some(f) = &mut self.form {
+                f.error = Some("TeamSpeak nicknames have to be 3 to 30 characters".into());
+            }
+            cx.notify();
             return None;
         }
         let saved = b.clone();
@@ -438,6 +449,9 @@ impl SettingsView {
             .child(row("Address", Input::new(&f.address).into_any_element()))
             .child(row("Name", Input::new(&f.label).into_any_element()))
             .child(row("Nickname", Input::new(&f.nickname).into_any_element()))
+            .when_some(f.error.clone(), |d, e| {
+                d.child(row("", div().text_sm().text_color(rgb(colors().red)).child(e).into_any_element()))
+            })
             .child(row("Phonetic nickname", Input::new(&f.phonetic).into_any_element()))
             .child(row("Server password", Input::new(&f.password).into_any_element()))
             .child(row("Default channel", Input::new(&f.channel).into_any_element()))
@@ -1502,6 +1516,20 @@ impl SettingsView {
                 }),
             )
             .child(self.screen_sharing(cx))
+            .child(
+                section("Troubleshooting").child(setting_row(
+                    "Log file",
+                    h_flex()
+                        .gap_3()
+                        .items_center()
+                        .child(Button::new("show-log").label("Show log").small().on_click(|_, _, cx| {
+                            if let Some(dir) = crate::log::path().parent() {
+                                cx.open_with_system(dir);
+                            }
+                        }))
+                        .child(label("Send wisp.log along when something doesn't work")),
+                )),
+            )
             .child(
                 section("Command line").child(
                     v_flex().gap_1().children(

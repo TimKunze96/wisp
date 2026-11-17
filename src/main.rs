@@ -9,6 +9,7 @@ mod demo;
 mod desktop;
 mod hotkeys;
 mod identity;
+mod log;
 mod logo;
 mod notify;
 mod net;
@@ -59,7 +60,7 @@ fn main() {
         std::process::exit(ctl::cli(&["show".to_string()]));
     }
 
-    tracing_subscriber::fmt().with_max_level(tracing::Level::ERROR).init();
+    log::init();
     let (handle, snapshots, settings) = if demo {
         demo::spawn()
     } else {

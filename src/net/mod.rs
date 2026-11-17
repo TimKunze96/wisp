@@ -6,6 +6,7 @@ pub mod admin;
 pub mod chat;
 pub mod files;
 mod banshee;
+pub use banshee::is_banshee;
 mod session;
 
 pub use chat::{ChatKind, ChatLine, Conversation};
