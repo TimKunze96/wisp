@@ -18,7 +18,8 @@ AMF=v1.4.35
 
 work=$(mktemp -d)
 cd "$work"
-curl -sSfL "https://ffmpeg.org/releases/ffmpeg-$FFMPEG.tar.xz" | tar xJ
+# GitHub's mirror of the release tag: ffmpeg.org doesn't always answer CI runners
+curl -sSfL --retry 3 "https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n$FFMPEG.tar.gz" | tar xz
 prefix=$work/prefix
 mkdir -p "$prefix/include"
 
@@ -82,7 +83,7 @@ case "$TARGET" in
         ;;
 esac
 
-cd "ffmpeg-$FFMPEG"
+cd "FFmpeg-n$FFMPEG"
 ./configure "${flags[@]}" >"$work/configure.log" || { tail -30 "$work/configure.log"; exit 1; }
 make -s -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu)" "$exe"
 case "$exe" in

@@ -47,7 +47,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc g++ clang cmake pkg-config libasound2-dev libfontconfig-dev \
-            libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libssl-dev libzstd-dev libvulkan1 libpipewire-0.3-dev
+            libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libssl-dev libzstd-dev libvulkan1 libpipewire-0.3-dev \
+            libva2 libva-drm2
           # 22.04's PipeWire headers (0.3.48) are too old for the bindings; 24.04's
           # are new enough, and everything we call exists in 0.3.48, so the binary
           # still runs on 22.04 (only the headers change, not the library)
@@ -80,8 +81,13 @@ jobs:
         shell: bash
         run: |
           chmod +x target/${{ matrix.target }}/release/wisp-ffmpeg* || true
-          cargo packager --release --target ${{ matrix.target }} \
-            --formats ${{ matrix.formats }} --out-dir dist
+          # macOS signing asks Apple's timestamp server, which sometimes doesn't answer
+          for attempt in 1 2 3; do
+            cargo packager --release --target ${{ matrix.target }} \
+              --formats ${{ matrix.formats }} --out-dir dist && break
+            [ "$attempt" = 3 ] && exit 1
+            sleep 20
+          done
 
       - uses: actions/upload-artifact@v7
         with:
