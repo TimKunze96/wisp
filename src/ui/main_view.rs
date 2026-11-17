@@ -277,8 +277,10 @@ impl MainView {
         if k.key == "escape" {
             if self.palette.take().is_some() {
             } else if self.prompt.take().is_some() {
-            } else if self.share.take().is_some() {
             } else if self.editor.take().is_some() {
+            } else if self.share.take().is_some() {
+            } else if self.model.read(cx).staged.is_some() {
+                self.model.update(cx, |m, cx| m.stage(None, cx));
             } else if self.filtering {
                 self.filtering = false;
                 self.filter.update(cx, |i, cx| i.set_value("", window, cx));

@@ -1,10 +1,11 @@
 //! A stream in its own window, with its controls along the bottom.
-//! Double-click the picture for fullscreen.
+//! Double-click the picture for fullscreen. Keys: F fullscreen, Escape out
+//! of it, M mute, P keep on top.
 
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::{
-    Context, Entity, FontWeight, InteractiveElement, IntoElement, ParentElement, Render, StatefulInteractiveElement,
-    Styled, Window, div, rgb,
+    Context, Entity, FocusHandle, FontWeight, InteractiveElement, IntoElement, KeyDownEvent, ParentElement, Render,
+    StatefulInteractiveElement, Styled, Window, div, rgb,
 };
 
 use super::Model;
@@ -17,6 +18,7 @@ pub struct ScreenView {
     feed: Entity<Feed>,
     /// Kept above other windows.
     pinned: bool,
+    focus: FocusHandle,
 }
 
 impl ScreenView {
@@ -27,7 +29,32 @@ impl ScreenView {
         })
         .detach();
         window.set_window_title(&format!("{}'s screen", feed.read(cx).name));
-        Self { model, feed, pinned: false }
+        let focus = cx.focus_handle();
+        window.focus(&focus, cx);
+        Self { model, feed, pinned: false, focus }
+    }
+
+    fn toggle_pin(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if super::pin::AVAILABLE {
+            self.pinned = !self.pinned;
+            super::pin::set(window, self.pinned);
+            cx.notify();
+        }
+    }
+
+    fn on_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let k = &ev.keystroke;
+        if k.modifiers.modified() {
+            return;
+        }
+        match k.key.as_str() {
+            "escape" if window.is_fullscreen() => window.toggle_fullscreen(),
+            "f" | "f11" => window.toggle_fullscreen(),
+            "m" => self.feed.update(cx, |f, cx| f.toggle_mute(cx)),
+            "p" => self.toggle_pin(window, cx),
+            _ => return,
+        }
+        cx.stop_propagation();
     }
 }
 
@@ -38,6 +65,8 @@ impl ScreenView {
         let model = self.model.clone();
         let fullscreen = window.is_fullscreen();
         v_flex()
+            .track_focus(&self.focus)
+            .on_key_down(cx.listener(|t, ev: &KeyDownEvent, window, cx| t.on_key(ev, window, cx)))
             .size_full()
             .bg(rgb(0x000000))
             .text_color(rgb(colors().text))
@@ -77,17 +106,13 @@ impl ScreenView {
                                 tool_button(
                                     "pin",
                                     if pinned { "pin-off" } else { "pin" },
-                                    if pinned { "Stop keeping on top" } else { "Keep on top of other windows" },
+                                    if pinned { "Stop keeping on top (P)" } else { "Keep on top of other windows (P)" },
                                 )
                                 .when(pinned, |b| b.bg(active_bg()))
-                                .on_click(cx.listener(|t, _, window, cx| {
-                                    t.pinned = !t.pinned;
-                                    super::pin::set(window, t.pinned);
-                                    cx.notify();
-                                })),
+                                .on_click(cx.listener(|t, _, window, cx| t.toggle_pin(window, cx))),
                             )
                         })
-                        .child(tool_button("fullscreen", "maximize", "Fullscreen (or double-click)").on_click(
+                        .child(tool_button("fullscreen", "maximize", "Fullscreen (F or double-click, Escape to leave)").on_click(
                             |_, window, _| window.toggle_fullscreen(),
                         ))
                         .child(tool_button("pop-in", "panel-bottom", "Back into the main window").on_click(
