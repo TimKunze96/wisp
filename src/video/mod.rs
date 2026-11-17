@@ -292,6 +292,8 @@ type Keyframes = [AtomicBool; MAX_LAYERS];
 pub struct Sharing {
     stop: Arc<AtomicBool>,
     keyframes: Arc<Keyframes>,
+    /// A source to switch to, picked up with the next frame.
+    next: Arc<Mutex<Option<Source>>>,
 }
 
 impl Sharing {
@@ -299,7 +301,8 @@ impl Sharing {
     pub fn start(source: Option<Source>, options: ShareOptions, out: tokio::sync::mpsc::Sender<ShareMsg>) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let keyframes: Arc<Keyframes> = Arc::new(Default::default());
-        let (s, k) = (stop.clone(), keyframes.clone());
+        let next: Arc<Mutex<Option<Source>>> = Arc::default();
+        let (s, k, n) = (stop.clone(), keyframes.clone(), next.clone());
         std::thread::Builder::new()
             .name("screen-share".into())
             .spawn(move || {
@@ -307,12 +310,17 @@ impl Sharing {
                     Some(s) => Ok(s),
                     None => open(Pick::Default),
                 };
-                if let Err(e) = source.and_then(|source| share(source, options, &s, &k, &out)) {
+                if let Err(e) = source.and_then(|source| share(source, options, &s, &k, &n, &out)) {
                     let _ = out.blocking_send(ShareMsg::Failed(format!("{e:#}")));
                 }
             })
             .expect("spawn screen share thread");
-        Self { stop, keyframes }
+        Self { stop, keyframes, next }
+    }
+
+    /// Share `source` instead from now on; viewers stay connected.
+    pub fn switch(&self, source: Source) {
+        *self.next.lock().unwrap() = Some(source);
     }
 
     /// Someone needs a full picture on this layer.
@@ -345,15 +353,16 @@ fn sound(out: &tokio::sync::mpsc::Sender<ShareMsg>) -> Option<sound::Sound> {
 }
 
 fn share(
-    source: Source,
+    mut source: Source,
     options: ShareOptions,
     stop: &AtomicBool,
     keyframes: &Keyframes,
+    next: &Mutex<Option<Source>>,
     out: &tokio::sync::mpsc::Sender<ShareMsg>,
 ) -> Result<()> {
     source.latest.set_fps(options.fps.clamp(1, MAX_FPS));
     let sound = if options.sound { sound(out) } else { None };
-    let result = encode_loop(options, &source.latest, stop, keyframes, out, sound.is_some());
+    let result = encode_loop(options, &mut source, next, stop, keyframes, out, sound.is_some());
     end_previews();
     drop(sound);
     // dropping the source closes the capture
@@ -512,7 +521,8 @@ struct GpuLayer {
 
 fn encode_loop(
     options: ShareOptions,
-    latest: &Latest,
+    source: &mut Source,
+    switch_to: &Mutex<Option<Source>>,
     stop: &AtomicBool,
     keyframes: &Keyframes,
     out: &tokio::sync::mpsc::Sender<ShareMsg>,
@@ -531,7 +541,16 @@ fn encode_loop(
     let mut preview_layer = 0;
     let mut last_preview = Instant::now() - PREVIEW_EVERY;
     while !stop.load(Ordering::Relaxed) && !out.is_closed() {
-        let fresh = match latest.take(Duration::from_millis(200)) {
+        // a new source: the old one closes as it's dropped; its size gets
+        // letterboxed into the layers like any other size change
+        if let Some(n) = switch_to.lock().unwrap().take() {
+            n.latest.set_fps(fps);
+            *source = n;
+            for k in keyframes.iter() {
+                k.store(true, Ordering::Relaxed);
+            }
+        }
+        let fresh = match source.latest.take(Duration::from_millis(200)) {
             Ok(f) => f,
             Err(()) => break,
         };

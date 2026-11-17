@@ -183,6 +183,8 @@ pub enum Cmd {
     /// Start or stop sharing our screen (Banshee servers).
     /// None stops sharing.
     Share { con: ConId, start: Option<crate::video::ShareStart> },
+    /// Share another screen or window in the running share.
+    ShareSwitch { con: ConId, source: crate::video::Source },
     /// Watch someone's screen onto `screen`, or stop (None).
     Watch { con: ConId, client: u16, screen: Option<crate::video::Screen>, quality: crate::video::Quality },
     /// Change the quality of a screen we watch.
@@ -435,6 +437,7 @@ pub(crate) enum SessionCmd {
     Admin(AdminAction),
     ChannelDescription(u64),
     Share(Option<crate::video::ShareStart>),
+    ShareSwitch(crate::video::Source),
     Watch(u16, Option<crate::video::Screen>, crate::video::Quality),
     WatchQuality(u16, crate::video::Quality),
     StreamVolume(u16, f32),
@@ -853,6 +856,7 @@ impl Manager {
             Cmd::ServerInfo { con, reply } => to(self, con, SessionCmd::ServerInfo(reply)),
             Cmd::Files { con, cmd } => to(self, con, SessionCmd::Files(cmd)),
             Cmd::Share { con, start } => to(self, con, SessionCmd::Share(start)),
+            Cmd::ShareSwitch { con, source } => to(self, con, SessionCmd::ShareSwitch(source)),
             Cmd::Watch { con, client, screen, quality } => to(self, con, SessionCmd::Watch(client, screen, quality)),
             Cmd::WatchQuality { con, client, quality } => to(self, con, SessionCmd::WatchQuality(client, quality)),
             Cmd::StreamVolume { con, client, volume } => to(self, con, SessionCmd::StreamVolume(client, volume)),

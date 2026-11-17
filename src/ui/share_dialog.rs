@@ -29,16 +29,20 @@ pub struct ShareDialog {
     gpu: Option<Option<&'static str>>,
     /// Counts the sources opened, so a late one from before is dropped.
     opened: u64,
+    /// Opened while sharing: switch the source, or stop.
+    live: bool,
 }
 
 enum SourceState {
+    /// Live, before picking something new.
+    Idle,
     Opening,
     Ready(Source),
     Failed(String),
 }
 
 impl MainView {
-    pub(super) fn open_share(&mut self, con: ConId, cx: &mut Context<Self>) {
+    pub(super) fn open_share(&mut self, con: ConId, live: bool, cx: &mut Context<Self>) {
         let s = &self.model.read(cx).settings;
         let screens = crate::video::screens();
         let pick = screens.first().map_or(Pick::Default, |s| Pick::Screen(s.id));
@@ -46,13 +50,17 @@ impl MainView {
             con,
             screens,
             pick,
-            source: SourceState::Opening,
+            source: if live { SourceState::Idle } else { SourceState::Opening },
             height: s.screen_height,
             fps: s.screen_fps,
             sound: s.screen_sound,
             gpu: None,
             opened: 0,
+            live,
         });
+        if live {
+            return;
+        }
         // trying the encoders takes a moment the first time
         cx.spawn(async move |this, cx| {
             let found = cx.background_executor().spawn(async { crate::video::gpu::detect().map(|g| g.label()) }).await;
@@ -104,6 +112,11 @@ impl MainView {
             self.share = Some(d);
             return;
         };
+        if d.live {
+            self.send(cx, Cmd::ShareSwitch { con: d.con, source });
+            cx.notify();
+            return;
+        }
         let (height, fps, sound) = (d.height, d.fps, d.sound);
         self.model.update(cx, |m, cx| {
             m.update_settings(cx, |s| {
@@ -127,6 +140,7 @@ impl MainView {
                 .child(div().flex_1().min_w_0().child(el))
         };
         let status = match &d.source {
+            SourceState::Idle => label(""),
             SourceState::Opening if d.screens.is_empty() => label("Pick a screen or window in the desktop's dialog..."),
             SourceState::Opening => label("Starting..."),
             SourceState::Ready(s) => label(match s.info.refresh {
@@ -159,8 +173,37 @@ impl MainView {
             SourceState::Ready(s) => Some(s.info.clone()),
             _ => None,
         };
-        let mut body = v_flex().gap_4().child(row("Share", source.into_any_element()));
-        if let Some(info) = &ready {
+        let idle = matches!(d.source, SourceState::Idle);
+        let mut body = if idle {
+            let con = d.con;
+            v_flex()
+                .gap_3()
+                .child(label("You're sharing. Switch to another screen or window, and viewers keep watching."))
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            Button::new("share-change")
+                                .label("Change what you share")
+                                .small()
+                                .primary()
+                                .on_click(cx.listener(|t, _, _, cx| {
+                                    let pick = t.share.as_ref().map_or(Pick::Default, |d| d.pick);
+                                    t.open_source(pick, cx)
+                                })),
+                        )
+                        .child(Button::new("share-stop").label("Stop sharing").small().danger().on_click(cx.listener(
+                            move |t, _, _, cx| {
+                                t.share = None;
+                                t.send(cx, Cmd::Share { con, start: None });
+                                cx.notify();
+                            },
+                        ))),
+                )
+        } else {
+            v_flex().gap_4().child(row("Share", source.into_any_element()))
+        };
+        if let Some(info) = ready.as_ref().filter(|_| !d.live) {
             let mut sizes = h_flex().gap_2().flex_wrap();
             for (i, size) in crate::video::sizes(info.width, info.height).into_iter().enumerate() {
                 let text = match size.choice {
@@ -228,7 +271,11 @@ impl MainView {
                         .border_1()
                         .border_color(border())
                         .shadow_lg()
-                        .child(div().font_weight(FontWeight::SEMIBOLD).child("Share your screen"))
+                        .child(div().font_weight(FontWeight::SEMIBOLD).child(if d.live {
+                            "Your screen share"
+                        } else {
+                            "Share your screen"
+                        }))
                         .child(body)
                         .child(
                             h_flex()
@@ -240,14 +287,16 @@ impl MainView {
                                         cx.notify();
                                     },
                                 )))
-                                .child(
-                                    Button::new("share-go")
-                                        .label("Go live")
-                                        .small()
-                                        .primary()
-                                        .disabled(ready.is_none())
-                                        .on_click(cx.listener(|t, _, _, cx| t.go_live(cx))),
-                                ),
+                                .when(!idle, |d2| {
+                                    d2.child(
+                                        Button::new("share-go")
+                                            .label(if d.live { "Switch" } else { "Go live" })
+                                            .small()
+                                            .primary()
+                                            .disabled(ready.is_none())
+                                            .on_click(cx.listener(|t, _, _, cx| t.go_live(cx))),
+                                    )
+                                }),
                         ),
                 )
                 .into_any_element(),

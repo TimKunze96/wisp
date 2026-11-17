@@ -1274,13 +1274,9 @@ impl MainView {
                 let on = snap.active_server().and_then(|s| s.channels.iter().flat_map(|c| &c.clients).find(|c| c.me)).is_some_and(|c| c.stream.is_some());
                 d.child(
                     icon_button("share", "monitor-up", if on { colors().accent } else { colors().muted }, on)
-                        .tooltip(move |w, cx| Tooltip::new(if on { "Stop sharing your screen" } else { "Share your screen" }).build(w, cx))
+                        .tooltip(move |w, cx| Tooltip::new(if on { "Switch what you share, or stop" } else { "Share your screen" }).build(w, cx))
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            if on {
-                                this.send(cx, Cmd::Share { con, start: None });
-                            } else {
-                                this.open_share(con, cx);
-                            }
+                            this.open_share(con, on, cx);
                         })),
                 )
             })

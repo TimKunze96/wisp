@@ -390,6 +390,11 @@ impl Session {
             SessionCmd::SetAvatar(None) => client.send(ClientMsg::ClearAvatar),
             SessionCmd::Share(Some(start)) => self.share(start),
             SessionCmd::Share(None) => self.sharing = None,
+            SessionCmd::ShareSwitch(source) => {
+                if let Some(s) = &self.sharing {
+                    s.switch(source);
+                }
+            }
             SessionCmd::Watch(id, Some(screen), quality) => {
                 let id = UserId::from(id);
                 client.send(ClientMsg::Watch { user: id, quality });
