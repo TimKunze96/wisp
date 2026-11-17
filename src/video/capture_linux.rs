@@ -17,7 +17,12 @@ use pw::spa::pod::{self, Pod, serialize::PodSerializer};
 use pw::spa::utils::{Direction, Fraction, Rectangle, SpaTypes};
 use pw::stream::{StreamFlags, StreamState};
 
-use super::{Latest, Order, Raw};
+use super::{Latest, Order, Pick, Raw, ScreenChoice};
+
+/// The desktop's picker lists screens and windows itself.
+pub fn screens() -> Vec<ScreenChoice> {
+    Vec::new()
+}
 
 pub struct Capture {
     pub latest: Arc<Latest>,
@@ -28,7 +33,7 @@ pub struct Capture {
 
 impl Capture {
     /// Ask the desktop what to share and start receiving it.
-    pub fn open(fps: u32) -> Result<Self> {
+    pub fn open(_pick: Pick) -> Result<Self> {
         let (portal, node, fd) = futures::executor::block_on(ask())?;
         let latest = Arc::new(Latest::default());
         let (quit, quit_rx) = pw::channel::channel();
@@ -36,7 +41,7 @@ impl Capture {
         let thread = std::thread::Builder::new()
             .name("screen-capture".into())
             .spawn(move || {
-                if let Err(e) = receive(node, fd, fps, &l, quit_rx) {
+                if let Err(e) = receive(node, fd, &l, quit_rx) {
                     tracing::warn!("screen capture: {e:#}");
                 }
                 l.end();
@@ -83,7 +88,10 @@ async fn ask() -> Result<((Screencast, Session<Screencast>), u32, OwnedFd)> {
     Ok(((proxy, session), node, fd))
 }
 
-fn receive(node: u32, fd: OwnedFd, fps: u32, latest: &Arc<Latest>, quit: pw::channel::Receiver<()>) -> Result<()> {
+/// Asked of the desktop: as fast as the screen goes (we drop what we don't need).
+const MAX_RATE: u32 = 360;
+
+fn receive(node: u32, fd: OwnedFd, latest: &Arc<Latest>, quit: pw::channel::Receiver<()>) -> Result<()> {
     pw::init();
     let main_loop = pw::main_loop::MainLoopRc::new(None)?;
     let context = pw::context::ContextRc::new(&main_loop, None)?;
@@ -99,6 +107,7 @@ fn receive(node: u32, fd: OwnedFd, fps: u32, latest: &Arc<Latest>, quit: pw::cha
     )?;
 
     let l = latest.clone();
+    let rate = latest.clone();
     let ml = main_loop.clone();
     let ml2 = main_loop.clone();
     let _listener = stream
@@ -108,17 +117,26 @@ fn receive(node: u32, fd: OwnedFd, fps: u32, latest: &Arc<Latest>, quit: pw::cha
                 ml.quit();
             }
         })
-        .param_changed(|_, format, id, param| {
+        .param_changed(move |_, format, id, param| {
             let Some(param) = param else { return };
             if id != ParamType::Format.as_raw() {
                 return;
             }
-            if let Ok((MediaType::Video, MediaSubtype::Raw)) = pw::spa::param::format_utils::parse_format(param) {
-                let _ = format.parse(param);
+            if let Ok((MediaType::Video, MediaSubtype::Raw)) = pw::spa::param::format_utils::parse_format(param)
+                && format.parse(param).is_ok()
+            {
+                // the most the desktop will send: its screen's refresh rate
+                let f = if format.max_framerate().num > 0 { format.max_framerate() } else { format.framerate() };
+                if f.num > 0 && f.denom > 0 && f.num / f.denom < MAX_RATE {
+                    rate.set_refresh(((f.num as f64) / f.denom as f64).round() as u32);
+                }
             }
         })
         .process(move |stream, format| {
             let Some(mut buffer) = stream.dequeue_buffer() else { return };
+            if !l.due() {
+                return;
+            }
             let order = match format.format() {
                 VideoFormat::BGRx | VideoFormat::BGRA => Order::Bgra,
                 VideoFormat::RGBx | VideoFormat::RGBA => Order::Rgba,
@@ -171,18 +189,18 @@ fn receive(node: u32, fd: OwnedFd, fps: u32, latest: &Arc<Latest>, quit: pw::cha
             Choice,
             Range,
             Fraction,
-            Fraction { num: fps, denom: 1 },
+            Fraction { num: MAX_RATE, denom: 1 },
             Fraction { num: 0, denom: 1 },
-            Fraction { num: 1000, denom: 1 }
+            Fraction { num: MAX_RATE, denom: 1 }
         ),
         pod::property!(
             FormatProperties::VideoMaxFramerate,
             Choice,
             Range,
             Fraction,
-            Fraction { num: fps, denom: 1 },
+            Fraction { num: MAX_RATE, denom: 1 },
             Fraction { num: 0, denom: 1 },
-            Fraction { num: fps, denom: 1 }
+            Fraction { num: MAX_RATE, denom: 1 }
         ),
     );
     let bytes = PodSerializer::serialize(Cursor::new(Vec::new()), &pod::Value::Object(format))

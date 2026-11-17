@@ -179,7 +179,8 @@ pub enum Cmd {
     /// Whether the main window has focus (no chat popups then).
     Focused(bool),
     /// Start or stop sharing our screen (Banshee servers).
-    Share { con: ConId, on: bool },
+    /// None stops sharing.
+    Share { con: ConId, start: Option<crate::video::ShareStart> },
     /// Watch someone's screen onto `screen`, or stop (None).
     Watch { con: ConId, client: u16, screen: Option<crate::video::Screen>, quality: crate::video::Quality },
     /// Change the quality of a screen we watch.
@@ -431,7 +432,7 @@ pub(crate) enum SessionCmd {
     CloseChat(ChatKind),
     Admin(AdminAction),
     ChannelDescription(u64),
-    Share(bool),
+    Share(Option<crate::video::ShareStart>),
     Watch(u16, Option<crate::video::Screen>, crate::video::Quality),
     WatchQuality(u16, crate::video::Quality),
     StreamVolume(u16, f32),
@@ -842,7 +843,7 @@ impl Manager {
             Cmd::Write { con, write } => to(self, con, SessionCmd::Write(write)),
             Cmd::ServerInfo { con, reply } => to(self, con, SessionCmd::ServerInfo(reply)),
             Cmd::Files { con, cmd } => to(self, con, SessionCmd::Files(cmd)),
-            Cmd::Share { con, on } => to(self, con, SessionCmd::Share(on)),
+            Cmd::Share { con, start } => to(self, con, SessionCmd::Share(start)),
             Cmd::Watch { con, client, screen, quality } => to(self, con, SessionCmd::Watch(client, screen, quality)),
             Cmd::WatchQuality { con, client, quality } => to(self, con, SessionCmd::WatchQuality(client, quality)),
             Cmd::StreamVolume { con, client, volume } => to(self, con, SessionCmd::StreamVolume(client, volume)),

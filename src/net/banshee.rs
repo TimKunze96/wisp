@@ -388,8 +388,8 @@ impl Session {
             SessionCmd::Files(cmd) => self.file_cmd(client, cmd),
             SessionCmd::SetAvatar(Some((path, _))) => self.set_avatar(path),
             SessionCmd::SetAvatar(None) => client.send(ClientMsg::ClearAvatar),
-            SessionCmd::Share(true) => self.share(),
-            SessionCmd::Share(false) => self.sharing = None,
+            SessionCmd::Share(Some(start)) => self.share(start),
+            SessionCmd::Share(None) => self.sharing = None,
             SessionCmd::Watch(id, Some(screen), quality) => {
                 let id = UserId::from(id);
                 client.send(ClientMsg::Watch { user: id, quality });
@@ -1022,15 +1022,13 @@ impl Session {
     /// Send the current state to the manager.
     /// Capture and encode on a thread; the stream to the server opens with
     /// the first frame (so a cancelled picker shows nothing to others).
-    fn share(&mut self) {
+    fn share(&mut self, start: crate::video::ShareStart) {
         if self.sharing.is_some() && self.me().is_some_and(|me| me.stream.is_some()) {
             return;
         }
         // video frames and 20 ms sound packets
         let (tx, mut rx) = mpsc::channel(32);
-        let s = &self.settings;
-        let options = crate::video::ShareOptions { max_height: s.screen_height, fps: s.screen_fps, gpu: s.screen_gpu };
-        self.sharing = Some(Sharing::start(options, tx));
+        self.sharing = Some(Sharing::start(start.source, start.options, tx));
         let (video, back, con) = (self.video.clone(), self.back.clone(), self.con_id);
         tokio::task::spawn_local(async move {
             let mut share = None;

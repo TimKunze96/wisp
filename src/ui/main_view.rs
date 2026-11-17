@@ -39,6 +39,7 @@ const RIGHT_W: f32 = 320.;
 pub struct MainView {
     pub(super) model: Entity<Model>,
     pub(super) prompt: Option<Prompt>,
+    pub(super) share: Option<super::share_dialog::ShareDialog>,
     pub(super) chat: Entity<InputState>,
     /// Volume slider of the selected user, with their uid.
     volume: Option<(String, Entity<SliderState>)>,
@@ -232,6 +233,7 @@ impl MainView {
         Self {
             model,
             prompt: None,
+            share: None,
             chat,
             volume: None,
             editor: None,
@@ -275,6 +277,7 @@ impl MainView {
         if k.key == "escape" {
             if self.palette.take().is_some() {
             } else if self.prompt.take().is_some() {
+            } else if self.share.take().is_some() {
             } else if self.editor.take().is_some() {
             } else if self.filtering {
                 self.filtering = false;
@@ -1240,7 +1243,13 @@ impl MainView {
                 d.child(
                     icon_button("share", "monitor-up", if on { colors().accent } else { colors().muted }, on)
                         .tooltip(move |w, cx| Tooltip::new(if on { "Stop sharing your screen" } else { "Share your screen" }).build(w, cx))
-                        .on_click(cx.listener(move |this, _, _, cx| this.send(cx, Cmd::Share { con, on: !on }))),
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if on {
+                                this.send(cx, Cmd::Share { con, start: None });
+                            } else {
+                                this.open_share(con, cx);
+                            }
+                        })),
                 )
             })
             .child({
@@ -1624,7 +1633,7 @@ impl Render for MainView {
         if self.drop_hint.is_some() && !cx.has_active_drag() {
             self.drop_hint = None;
         }
-        let overlay = self.prompt_overlay(cx).or_else(|| self.host_message(cx)).or_else(|| self.palette_overlay(cx));
+        let overlay = self.prompt_overlay(cx).or_else(|| self.share_overlay(cx)).or_else(|| self.host_message(cx)).or_else(|| self.palette_overlay(cx));
         let editor = self.editor.clone().map(|e| {
             div()
                 .absolute()

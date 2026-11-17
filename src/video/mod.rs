@@ -47,22 +47,90 @@ const KEYFRAME_FRAMES: u32 = FPS * 10;
 /// The GPU layer can't be asked for keyframes, so it sends one this often.
 const GPU_KEYFRAME_SECS: u32 = 2;
 
+/// Whether we can send the computer's sound along.
+pub const SOUND: bool = cfg!(any(target_os = "linux", windows));
+
 /// What the sharer picked.
 #[derive(Clone, Copy, Debug)]
 pub struct ShareOptions {
-    /// Biggest picture height (the width follows the screen).
-    pub max_height: u32,
+    /// Height of the best layer, 0 for the source's own. The width follows
+    /// the source, so odd shapes keep their shape.
+    pub height: u32,
     pub fps: u32,
-    /// Encode the best layer on the graphics card when there's a way.
-    pub gpu: bool,
+    pub sound: bool,
 }
 
 impl ShareOptions {
-    fn max_size(&self) -> (usize, usize) {
-        let h = self.max_height as usize;
-        (h * 16 / 9, h)
+    fn max_size(&self, width: usize, height: usize) -> (usize, usize) {
+        match self.height as usize {
+            0 => (width, height),
+            h => (width * h / height.max(1) + 1, h),
+        }
     }
 }
+
+/// A picture size to offer for a source of `width`×`height`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Size {
+    pub width: u32,
+    pub height: u32,
+    /// 0 for the source's own size.
+    pub choice: u32,
+}
+
+/// The source's own size and the usual heights below it, each keeping the
+/// source's shape.
+pub fn sizes(width: u32, height: u32) -> Vec<Size> {
+    let mut out = vec![Size { width, height, choice: 0 }];
+    for h in [2160, 1440, 1080, 720] {
+        // only clearly smaller ones
+        if h * 10 <= height * 9 {
+            let w = (((width as u64 * h as u64) as f64 / height as f64).round() as u32) & !1;
+            out.push(Size { width: w, height: h, choice: h });
+        }
+    }
+    out
+}
+
+/// Frame rates to offer for a screen refreshing `refresh` times a second.
+pub fn rates(refresh: Option<u32>) -> Vec<u32> {
+    let mut out = vec![15, 30, 60];
+    match refresh {
+        Some(r) if r > 60 => {
+            for f in [120, 144, 165, 240] {
+                if f <= r {
+                    out.push(f);
+                }
+            }
+            // 75, 100, 170: the screen's own rate too
+            if !out.contains(&r) && r <= MAX_FPS {
+                out.push(r);
+            }
+        }
+        Some(r) if r >= 15 => out.retain(|&f| f <= r.max(30)),
+        _ => {}
+    }
+    out
+}
+
+/// Upload in bits per second for `options` on a `width`×`height` source.
+pub fn estimate(width: u32, height: u32, options: ShareOptions, gpu: bool) -> u32 {
+    let (w, h) = (width as usize, height as usize);
+    let fps = options.fps.clamp(1, MAX_FPS);
+    let sizes = ladder(w, h, options.max_size(w, h));
+    let mut total = if options.sound { 128_000 } else { 0 };
+    for (i, &(lw, lh)) in sizes.iter().enumerate() {
+        total += match (gpu, i) {
+            (true, 0) => gpu_bitrate(lw, lh, fps),
+            (true, _) => bitrate(lw, lh, fps.min(FPS)),
+            (false, _) => bitrate(lw, lh, fps),
+        };
+    }
+    total
+}
+
+/// The fastest we encode.
+const MAX_FPS: u32 = 240;
 
 /// Pixel order of a captured frame (the fourth byte is ignored).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -82,13 +150,54 @@ pub struct Raw {
 }
 
 /// The newest frame from a capture thread; older ones are dropped.
-#[derive(Default)]
 pub struct Latest {
     frame: Mutex<(Option<Raw>, bool)>,
     ready: Condvar,
+    /// Frames closer together than this aren't worth copying.
+    interval: Mutex<(Duration, Option<Instant>)>,
+    /// The source's refresh rate, when the capture knows it.
+    refresh: std::sync::atomic::AtomicU32,
+}
+
+impl Default for Latest {
+    fn default() -> Self {
+        Self {
+            frame: Default::default(),
+            ready: Default::default(),
+            interval: Mutex::new((Duration::from_secs(1) / 60, None)),
+            refresh: Default::default(),
+        }
+    }
 }
 
 impl Latest {
+    /// Whether a frame arriving now is wanted (asked before copying it).
+    pub fn due(&self) -> bool {
+        let mut i = self.interval.lock().unwrap();
+        let now = Instant::now();
+        // a little slack, or frames right on the rate get skipped half the time
+        if i.1.is_some_and(|last| now < last + i.0 * 9 / 10) {
+            return false;
+        }
+        i.1 = Some(now);
+        true
+    }
+
+    fn set_fps(&self, fps: u32) {
+        self.interval.lock().unwrap().0 = Duration::from_secs(1) / fps.max(1);
+    }
+
+    pub fn set_refresh(&self, hz: u32) {
+        self.refresh.store(hz, Ordering::Relaxed);
+    }
+
+    /// The size of the first frame, waiting up to `timeout` for it.
+    fn size(&self, timeout: Duration) -> Option<(usize, usize)> {
+        let guard = self.frame.lock().unwrap();
+        let (guard, _) = self.ready.wait_timeout_while(guard, timeout, |(f, ended)| f.is_none() && !*ended).unwrap();
+        guard.0.as_ref().map(|f| (f.width, f.height))
+    }
+
     pub fn put(&self, frame: Raw) {
         self.frame.lock().unwrap().0 = Some(frame);
         self.ready.notify_one();
@@ -152,15 +261,19 @@ pub struct Sharing {
 }
 
 impl Sharing {
-    /// Ask the user what to share, then send packets to `out` until stopped.
-    pub fn start(options: ShareOptions, out: tokio::sync::mpsc::Sender<ShareMsg>) -> Self {
+    /// Send `source` (or, without one, the default screen) to `out` until stopped.
+    pub fn start(source: Option<Source>, options: ShareOptions, out: tokio::sync::mpsc::Sender<ShareMsg>) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let keyframes: Arc<Keyframes> = Arc::new(Default::default());
         let (s, k) = (stop.clone(), keyframes.clone());
         std::thread::Builder::new()
             .name("screen-share".into())
             .spawn(move || {
-                if let Err(e) = share(options, &s, &k, &out) {
+                let source = match source {
+                    Some(s) => Ok(s),
+                    None => open(Pick::Default),
+                };
+                if let Err(e) = source.and_then(|source| share(source, options, &s, &k, &out)) {
                     let _ = out.blocking_send(ShareMsg::Failed(format!("{e:#}")));
                 }
             })
@@ -198,36 +311,120 @@ fn sound(out: &tokio::sync::mpsc::Sender<ShareMsg>) -> Option<sound::Sound> {
 }
 
 fn share(
+    source: Source,
     options: ShareOptions,
     stop: &AtomicBool,
     keyframes: &Keyframes,
     out: &tokio::sync::mpsc::Sender<ShareMsg>,
 ) -> Result<()> {
-    // WISP_TEST_SCREEN=WxH shares a moving test picture instead of the screen
-    if let Some((w, h)) = std::env::var("WISP_TEST_SCREEN").ok().and_then(|v| {
-        let (w, h) = v.split_once('x')?;
-        Some((w.parse().ok()?, h.parse().ok()?))
-    }) {
-        let latest = Arc::new(Latest::default());
-        let (l, stopped) = (latest.clone(), Arc::new(AtomicBool::new(false)));
-        let s = stopped.clone();
-        let fps = options.fps;
-        std::thread::spawn(move || test_pattern(w, h, fps, &l, &s));
-        let sound = sound(out);
-        let result = encode_loop(options, &latest, stop, keyframes, out, sound.is_some());
-        stopped.store(true, Ordering::Relaxed);
-        return result;
-    }
-    let capture = capture::Capture::open(options.fps)?;
-    let sound = sound(out);
-    let result = encode_loop(options, &capture.latest, stop, keyframes, out, sound.is_some());
+    source.latest.set_fps(options.fps.clamp(1, MAX_FPS));
+    let sound = if options.sound { sound(out) } else { None };
+    let result = encode_loop(options, &source.latest, stop, keyframes, out, sound.is_some());
     drop(sound);
-    capture.close();
+    // dropping the source closes the capture
+    drop(source);
     result
 }
 
-/// Bars that move, `fps` frames a second.
-fn test_pattern(width: usize, height: usize, fps: u32, latest: &Latest, stop: &AtomicBool) {
+/// What to capture.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Pick {
+    /// Linux: the desktop asks. Elsewhere: the main screen.
+    Default,
+    /// One of `screens()` (not on Linux, where the desktop asks).
+    Screen(u32),
+}
+
+/// A screen to offer, where Wisp lists them itself.
+#[derive(Clone, Debug)]
+pub struct ScreenChoice {
+    pub id: u32,
+    pub label: String,
+}
+
+/// The screens to pick from; empty where the desktop's own picker asks.
+pub fn screens() -> Vec<ScreenChoice> {
+    capture::screens()
+}
+
+/// Start sharing: an opened source (None: the default screen, for the
+/// command line) and how.
+#[derive(Debug)]
+pub struct ShareStart {
+    pub source: Option<Source>,
+    pub options: ShareOptions,
+}
+
+/// What a source turned out to be.
+#[derive(Clone, Debug)]
+pub struct SourceInfo {
+    pub width: u32,
+    pub height: u32,
+    /// Refresh rate, when the capture knows it.
+    pub refresh: Option<u32>,
+}
+
+/// A capture that runs, waiting to be shared; dropping it stops it.
+pub struct Source {
+    latest: Arc<Latest>,
+    pub info: SourceInfo,
+    /// Dropped with us, which tells the capture's thread to close it.
+    _close: std::sync::mpsc::Sender<()>,
+}
+
+impl std::fmt::Debug for Source {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Source({:?})", self.info)
+    }
+}
+
+/// Start capturing (on Linux the desktop asks what) and wait for the first
+/// frame, which tells the size. Blocks; run it off the UI thread.
+pub fn open(pick: Pick) -> Result<Source> {
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    let (close, close_rx) = std::sync::mpsc::channel::<()>();
+    // the capture lives on its own thread (not every platform's can move)
+    std::thread::Builder::new().name("screen-capture-owner".into()).spawn(move || {
+        // WISP_TEST_SCREEN=WxH shares a moving test picture instead of the screen
+        if let Some((w, h)) = test_screen() {
+            let latest = Arc::new(Latest::default());
+            let stopped = Arc::new(AtomicBool::new(false));
+            let (l, s) = (latest.clone(), stopped.clone());
+            std::thread::spawn(move || test_pattern(w, h, &l, &s));
+            let _ = ready_tx.send(Ok(latest));
+            let _ = close_rx.recv();
+            stopped.store(true, Ordering::Relaxed);
+            return;
+        }
+        match capture::Capture::open(pick) {
+            Ok(c) => {
+                let _ = ready_tx.send(Ok(c.latest.clone()));
+                let _ = close_rx.recv();
+                c.close();
+            }
+            Err(e) => {
+                let _ = ready_tx.send(Err(e));
+            }
+        }
+    })?;
+    let latest = ready_rx.recv().context("the capture stopped")??;
+    let (width, height) = latest.size(Duration::from_secs(10)).context("the screen sent no picture")?;
+    let refresh = match latest.refresh.load(Ordering::Relaxed) {
+        0 => None,
+        hz => Some(hz),
+    };
+    let info = SourceInfo { width: width as u32, height: height as u32, refresh };
+    Ok(Source { latest, info, _close: close })
+}
+
+fn test_screen() -> Option<(usize, usize)> {
+    let v = std::env::var("WISP_TEST_SCREEN").ok()?;
+    let (w, h) = v.split_once('x')?;
+    Some((w.parse().ok()?, h.parse().ok()?))
+}
+
+/// Bars that move, at whatever rate `latest` wants.
+fn test_pattern(width: usize, height: usize, latest: &Latest, stop: &AtomicBool) {
     let mut t = 0usize;
     // two pictures drawn once, then shifted: drawing each frame costs too much at 4K
     let draw = |shift: usize| {
@@ -255,7 +452,9 @@ fn test_pattern(width: usize, height: usize, fps: u32, latest: &Latest, stop: &A
         }
         latest.put(Raw { width, height, stride: width * 4, order: Order::Bgra, data });
         t += 1;
-        std::thread::sleep(Duration::from_secs(1) / fps);
+        // as fast as asked, like a screen that refreshes at 240
+        let wait = latest.interval.lock().unwrap().0;
+        std::thread::sleep(wait);
     }
     latest.end();
 }
@@ -284,8 +483,8 @@ fn encode_loop(
     out: &tokio::sync::mpsc::Sender<ShareMsg>,
     audio: bool,
 ) -> Result<()> {
-    let fps = options.fps.clamp(1, 120);
-    let gpu = if options.gpu { gpu::detect() } else { None };
+    let fps = options.fps.clamp(1, MAX_FPS);
+    let gpu = gpu::detect();
     let mut top: Option<GpuLayer> = None;
     let mut layers: Vec<CpuLayer> = Vec::new();
     let mut started = false;
@@ -317,7 +516,7 @@ fn encode_loop(
         // the layers are fixed by the first frame; later sizes are letterboxed
         if !started {
             started = true;
-            let sizes = ladder(frame.width, frame.height, options.max_size());
+            let sizes = ladder(frame.width, frame.height, options.max_size(frame.width, frame.height));
             let mut info = Vec::new();
             let mut cpu_sizes = &sizes[..];
             if let Some(g) = &gpu {
@@ -588,6 +787,29 @@ mod tests {
         assert_eq!(ladder(1001, 701, HD), [(1000, 700), (514, 360)]);
         assert_eq!(ladder(3440, 1440, HD), [(1920, 804), (860, 360)]);
         assert_eq!(ladder(800, 450, HD), [(800, 450)]);
+    }
+
+    #[test]
+    fn picker_sizes() {
+        let heights = |w, h| sizes(w, h).iter().map(|s| (s.width, s.height, s.choice)).collect::<Vec<_>>();
+        assert_eq!(heights(3440, 1440), [(3440, 1440, 0), (2580, 1080, 1080), (1720, 720, 720)]);
+        assert_eq!(heights(1920, 1200), [(1920, 1200, 0), (1728, 1080, 1080), (1152, 720, 720)]);
+        assert_eq!(heights(1280, 720), [(1280, 720, 0)]);
+        // the chosen height gives the layer the picker showed
+        let options = ShareOptions { height: 1080, fps: 30, sound: false };
+        assert_eq!(ladder(3440, 1440, options.max_size(3440, 1440))[0], (2580, 1080));
+        let native = ShareOptions { height: 0, ..options };
+        assert_eq!(ladder(3440, 1440, native.max_size(3440, 1440))[0], (3440, 1440));
+    }
+
+    #[test]
+    fn picker_rates() {
+        assert_eq!(rates(None), [15, 30, 60]);
+        assert_eq!(rates(Some(60)), [15, 30, 60]);
+        assert_eq!(rates(Some(30)), [15, 30]);
+        assert_eq!(rates(Some(75)), [15, 30, 60, 75]);
+        assert_eq!(rates(Some(144)), [15, 30, 60, 120, 144]);
+        assert_eq!(rates(Some(165)), [15, 30, 60, 120, 144, 165]);
     }
 
     /// A frame survives encoding and decoding (roughly: it's lossy).

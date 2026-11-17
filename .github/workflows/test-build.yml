@@ -7,16 +7,16 @@ on:
   pull_request:
     types: [labeled, synchronize]
 
-concurrency:
-  group: test-build-${{ github.ref }}
-  cancel-in-progress: true
-
 env:
   CMAKE_POLICY_VERSION_MINIMUM: "3.5"
 
 jobs:
   build:
     if: contains(github.event.pull_request.labels.*.name, 'test build')
+    # on the job, so a skipped run (push and label at once) doesn't cancel a real one
+    concurrency:
+      group: test-build-${{ github.ref }}-${{ matrix.target }}
+      cancel-in-progress: true
     strategy:
       fail-fast: false
       matrix:

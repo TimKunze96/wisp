@@ -243,8 +243,11 @@ async fn handle(line: &str, cmds: &mpsc::UnboundedSender<Cmd>) -> Value {
         }
         "share" => match snap.active_server() {
             Some(s) if s.screens => {
-                let on = !matches!(arg, "off" | "stop");
-                let _ = cmds.send(Cmd::Share { con: s.con, on });
+                let start = (!matches!(arg, "off" | "stop")).then(|| crate::video::ShareStart {
+                    source: None,
+                    options: crate::config::Settings::load().share_options(),
+                });
+                let _ = cmds.send(Cmd::Share { con: s.con, start });
                 ok
             }
             Some(_) => json!({"ok": false, "error": "this server can't do screen sharing"}),

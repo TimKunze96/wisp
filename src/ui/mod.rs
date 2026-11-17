@@ -13,6 +13,7 @@ pub mod colors;
 mod main_view;
 mod menus;
 mod settings;
+mod share_dialog;
 mod theme;
 mod updater;
 mod widgets;
