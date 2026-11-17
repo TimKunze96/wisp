@@ -10,19 +10,16 @@ mod sound;
 #[path = "sound_windows.rs"]
 mod sound;
 #[cfg(target_os = "macos")]
-mod sound {
-    pub struct Sound;
-    impl Sound {
-        pub fn start(_packets: impl FnMut(Vec<u8>) + Send + 'static) -> anyhow::Result<Self> {
-            anyhow::bail!("sharing sound isn't supported here yet")
-        }
-    }
-}
+#[path = "sound_mac.rs"]
+mod sound;
 #[cfg(target_os = "linux")]
 #[path = "capture_linux.rs"]
 mod capture;
-#[cfg(not(target_os = "linux"))]
+#[cfg(windows)]
 #[path = "capture_xcap.rs"]
+mod capture;
+#[cfg(target_os = "macos")]
+#[path = "capture_mac.rs"]
 mod capture;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -48,7 +45,7 @@ const KEYFRAME_FRAMES: u32 = FPS * 10;
 const GPU_KEYFRAME_SECS: u32 = 2;
 
 /// Whether we can send the computer's sound along.
-pub const SOUND: bool = cfg!(any(target_os = "linux", windows));
+pub const SOUND: bool = cfg!(any(target_os = "linux", windows, target_os = "macos"));
 
 /// What the sharer picked.
 #[derive(Clone, Copy, Debug)]

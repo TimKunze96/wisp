@@ -46,12 +46,16 @@ ashpd = { version = "0.13", default-features = false, features = ["async-io", "g
 pipewire = "0.10.1"
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
-xcap = "0.9.10"
 tray-icon = "0.26"
 global-hotkey = "0.9"
 notify-rust = "4"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+screencapturekit = { version = "11.1.2", features = ["macos_14_0"] }
+apple-cf = { version = "0.11", default-features = false, features = ["cg"] }
+
 [target.'cfg(windows)'.dependencies]
+xcap = "0.9.10"
 wasapi = "0.27.0"
 winreg = "0.56"
 windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
@@ -81,7 +85,8 @@ deep-link-protocols = [{ schemes = ["ts3server"] }]
 [package.metadata.packager.macos]
 # Ad-hoc signature; there is no Developer ID certificate.
 signing-identity = "-"
-minimum-system-version = "11.0"
+# ScreenCaptureKit
+minimum-system-version = "12.3"
 info-plist-path = "packaging/macos/Info.plist"
 
 [package.metadata.packager.deb]
