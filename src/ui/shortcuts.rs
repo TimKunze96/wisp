@@ -28,6 +28,7 @@ const IN_APP: &[(&str, &[(&str, &str)])] = &[
             ("F or F11", "Fullscreen (double-click works too)"),
             ("Escape", "Leave fullscreen"),
             ("M", "Mute the stream's sound"),
+            ("+ − 0", "Zoom in, out, back to all of it (wheel or pinch too, drag to move)"),
             ("P", "Keep the window on top (macOS, Windows)"),
         ],
     ),

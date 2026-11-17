@@ -54,6 +54,8 @@ pub struct Feed {
     pub slider: Entity<SliderState>,
     /// Our own share, previewed from the encoder instead of the server.
     pub own: bool,
+    /// How far the big view is zoomed in, and where.
+    pub zoom: super::zoom::Zoom,
 }
 
 impl Feed {
@@ -92,6 +94,7 @@ impl Feed {
             muted: false,
             slider,
             own,
+            zoom: super::zoom::Zoom::new(),
         };
         f.watch(cx);
         f
@@ -105,6 +108,7 @@ impl Feed {
         let (screen, mut changed) = if self.own { crate::video::preview() } else { Screen::new() };
         self.screen = screen.clone();
         self.ended = false;
+        self.zoom.reset();
         self.sent = self.quality();
         if !self.own {
             self.net.send(Cmd::Watch { con: self.con, client: self.client, screen: Some(screen), quality: self.sent });
@@ -197,6 +201,17 @@ impl Feed {
 
     pub fn viewers(&self) -> u32 {
         self.info.as_ref().map_or(0, |i| i.viewers.len() as u32)
+    }
+
+    /// The current picture, while the stream runs.
+    pub fn image(&self) -> Option<Arc<RenderImage>> {
+        self.image.clone().filter(|_| !self.ended)
+    }
+
+    /// The picture's size in pixels.
+    pub fn picture_size(&self) -> Option<(f32, f32)> {
+        let s = self.image()?.size(0);
+        Some((s.width.0 as f32, s.height.0 as f32)).filter(|(w, h)| *w > 0. && *h > 0.)
     }
 
     /// The picture, or a line saying why there's none, filling its box.
@@ -424,6 +439,7 @@ pub fn stage(model: &Entity<Model>, feed: &Entity<Feed>, cx: &App) -> impl IntoE
                 .child(div().flex_1())
                 .children(sound_controls(feed, cx))
                 .children(quality_picker(feed, cx))
+                .child(zoom_button(feed, f.zoom.zoomed()))
                 .child(
                     tool_button("pop-out", "external-link", "Open in its own window").on_click(move |_, _, cx| {
                         let (con, client, name) = key_name(&m1, key, cx);
@@ -437,12 +453,24 @@ pub fn stage(model: &Entity<Model>, feed: &Entity<Feed>, cx: &App) -> impl IntoE
                     }),
                 ),
         )
-        .child(div().flex_1().min_h_0().rounded(px(6.)).overflow_hidden().bg(rgb(0x000000)).child(f.picture()))
+        .child(div().flex_1().min_h_0().rounded(px(6.)).overflow_hidden().bg(rgb(0x000000)).child(super::zoom::view(feed, cx)))
 }
 
 fn key_name(model: &Entity<Model>, key: FeedKey, cx: &App) -> (ConId, u16, String) {
     let name = model.read(cx).feeds.get(&key).map(|f| f.read(cx).name.clone()).unwrap_or_default();
     (key.0, key.1, name)
+}
+
+/// Zoom in on the picture, or back to all of it (the wheel and keys do more).
+pub fn zoom_button(feed: &Entity<Feed>, zoomed: bool) -> gpui_kit::Stateful<gpui_kit::Div> {
+    let feed = feed.clone();
+    tool_button(
+        "zoom",
+        if zoomed { "zoom-out" } else { "zoom-in" },
+        if zoomed { "Show all of it (0)" } else { "Zoom in (+, mouse wheel or pinch; drag to move around)" },
+    )
+    .when(zoomed, |b| b.bg(active_bg()))
+    .on_click(move |_, _, cx| super::zoom::toggle(&feed, cx))
 }
 
 pub fn tool_button(id: &'static str, name: &'static str, tip: &'static str) -> gpui_kit::Stateful<gpui_kit::Div> {

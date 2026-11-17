@@ -20,6 +20,7 @@ mod shortcuts;
 mod theme;
 mod updater;
 mod widgets;
+mod zoom;
 
 use futures::StreamExt;
 use futures::channel::mpsc::UnboundedReceiver;

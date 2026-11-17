@@ -1,6 +1,6 @@
 //! A stream in its own window, with its controls along the bottom.
 //! Double-click the picture for fullscreen. Keys: F fullscreen, Escape out
-//! of it, M mute, P keep on top.
+//! of it, M mute, P keep on top, + - 0 zoom.
 
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::{
@@ -10,7 +10,7 @@ use gpui_kit::{
 
 use super::Model;
 use super::colors::colors;
-use super::streams::{Feed, quality_picker, sound_controls, tool_button};
+use super::streams::{Feed, quality_picker, sound_controls, tool_button, zoom_button};
 use super::widgets::*;
 
 pub struct ScreenView {
@@ -44,7 +44,28 @@ impl ScreenView {
 
     fn on_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let k = &ev.keystroke;
-        if k.modifiers.modified() {
+        let m = &k.modifiers;
+        // + needs Shift on most layouts
+        if !(m.control || m.alt || m.platform) {
+            let zoom = match k.key.as_str() {
+                "+" | "=" => Some(Some(super::zoom::STEP)),
+                "-" => Some(Some(1. / super::zoom::STEP)),
+                "0" => Some(None),
+                _ => None,
+            };
+            if let Some(zoom) = zoom {
+                self.feed.update(cx, |f, cx| {
+                    match zoom {
+                        Some(factor) => f.zoom.step(factor, f.picture_size()),
+                        None => f.zoom.reset(),
+                    }
+                    super::zoom::changed(f, cx);
+                });
+                cx.stop_propagation();
+                return;
+            }
+        }
+        if m.modified() {
             return;
         }
         match k.key.as_str() {
@@ -81,7 +102,7 @@ impl ScreenView {
                             window.toggle_fullscreen();
                         }
                     })
-                    .child(f.picture()),
+                    .child(super::zoom::view(&self.feed, cx)),
             )
             .when(!fullscreen, |d| {
                 d.child(
@@ -100,6 +121,7 @@ impl ScreenView {
                         .child(div().flex_1())
                         .children(sound_controls(&self.feed, cx))
                         .children(quality_picker(&self.feed, cx))
+                        .child(zoom_button(&self.feed, f.zoom.zoomed()))
                         .when(super::pin::AVAILABLE, |d| {
                             let pinned = self.pinned;
                             d.child(
