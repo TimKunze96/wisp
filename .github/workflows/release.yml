@@ -43,6 +43,9 @@ jobs:
       - name: Install dependencies (Ubuntu only)
         if: startsWith(matrix.platform, 'ubuntu')
         run: |
+          # 22.04's PipeWire (0.3.48) is too old for the bindings' headers; the
+          # functions we call all exist in it, so the binary still runs there
+          sudo add-apt-repository -y ppa:pipewire-debian/pipewire-upstream
           sudo apt-get update
           sudo apt-get install -y gcc g++ clang cmake pkg-config libasound2-dev libfontconfig-dev \
             libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libssl-dev libzstd-dev libvulkan1 libpipewire-0.3-dev
